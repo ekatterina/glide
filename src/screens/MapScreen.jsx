@@ -265,27 +265,33 @@ export default function MapScreen({ onNavigate }) {
         </div>
       </motion.div>
 
-      {/* Report button — floats above route card */}
+      {/* Report obstruction pill — prominent, above route card */}
       {!showDirections && (
         <motion.div
-          initial={{ opacity: 0, scale: 0.7 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.7, duration: 0.4, type: 'spring', stiffness: 200, damping: 18 }}
-          className="absolute bottom-[340px] right-4 z-20 flex flex-col items-center gap-1.5"
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.7, duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+          className="absolute bottom-[330px] left-0 right-0 z-20 flex justify-center px-5"
         >
           <motion.button
-            whileTap={{ scale: 0.9 }}
+            whileTap={{ scale: 0.96 }}
             onClick={() => onNavigate('report')}
-            className="w-14 h-14 rounded-full bg-navy shadow-[0_4px_20px_rgba(0,0,0,0.55)] flex items-center justify-center border border-white/20"
-            aria-label="Report obstruction"
+            className="flex items-center gap-3 bg-[#FF6B4A] text-white rounded-full pl-2 pr-5 h-13 shadow-[0_4px_24px_rgba(255,107,74,0.55)] border border-white/20"
+            style={{ height: 52 }}
+            aria-label={t('reportTitle')}
           >
-            <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" aria-hidden="true">
-              <rect x="2" y="7" width="20" height="14" rx="3" stroke="white" strokeWidth="1.8"/>
-              <circle cx="12" cy="13.5" r="3.5" stroke="white" strokeWidth="1.8"/>
-              <path d="M8 7l1.5-2.5h5L16 7" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
+            <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
+              <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" aria-hidden="true">
+                <rect x="2" y="7" width="20" height="14" rx="3" stroke="white" strokeWidth="2"/>
+                <circle cx="12" cy="13.5" r="3.5" stroke="white" strokeWidth="2"/>
+                <path d="M8 7l1.5-2.5h5L16 7" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </div>
+            <div className="flex flex-col items-start">
+              <span className="font-body font-bold text-sm leading-tight">{t('reportTitle')}</span>
+              <span className="font-body text-[11px] text-white/75 leading-tight">{t('reportObstructionSub')}</span>
+            </div>
           </motion.button>
-          <span className="font-body text-xs text-white/65 font-medium">Report</span>
         </motion.div>
       )}
 

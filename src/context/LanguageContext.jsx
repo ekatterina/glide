@@ -69,6 +69,7 @@ const translations = {
 
     // ReportScreen
     reportTitle: 'Report obstruction',
+    reportObstructionSub: 'Help others by adding to the map',
     reportPrompt: 'Take a photo of the obstruction',
     reportCaptureBtn: 'Take photo',
     reportDemoBtn: 'Skip — use demo image',
@@ -150,6 +151,7 @@ const translations = {
 
     // ReportScreen
     reportTitle: 'Obstructie melden',
+    reportObstructionSub: 'Help anderen door aan de kaart toe te voegen',
     reportPrompt: 'Maak een foto van de obstructie',
     reportCaptureBtn: 'Maak foto',
     reportDemoBtn: 'Overslaan — gebruik demo-afbeelding',
