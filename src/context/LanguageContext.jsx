@@ -24,6 +24,7 @@ const translations = {
     // MapScreen
     backToHome: 'Back to home screen',
     demoNotice: 'Demo map — add a Mapbox token for a live map',
+    legendRouteHeader: 'Route grade',
     legendAccessible: 'Accessible',
     legendModerate: 'Moderate',
     legendDifficult: 'Difficult',
@@ -148,6 +149,7 @@ const translations = {
     // MapScreen
     backToHome: 'Terug naar beginscherm',
     demoNotice: 'Demo kaart — voeg Mapbox token toe voor live kaart',
+    legendRouteHeader: 'Route-niveau',
     legendAccessible: 'Toegankelijk',
     legendModerate: 'Matig',
     legendDifficult: 'Moeilijk',

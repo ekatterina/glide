@@ -723,14 +723,9 @@ function Legend({ t, showObstacles }) {
       transition={{ delay: 0.25 }}
       className="pointer-events-auto flex flex-col items-stretch gap-1.5 bg-black/40 backdrop-blur-md rounded-2xl px-3 py-2.5 shadow-card border border-white/10 max-w-[210px]"
     >
-      <div className="flex items-center gap-1.5">
-        <div className="relative w-2 h-2 flex-shrink-0">
-          <div className="absolute inset-0 rounded-full bg-accessible animate-ping opacity-75" />
-          <div className="w-2 h-2 rounded-full bg-accessible relative" />
-        </div>
-        <span className="font-body text-xs text-white/85 font-semibold tracking-wide">Live</span>
-      </div>
-      <div className="w-full h-px bg-white/15" aria-hidden="true" />
+      <p className="font-body text-[10px] text-white/55 uppercase tracking-widest font-semibold">
+        {t('legendRouteHeader')}
+      </p>
       <LegendDot color="#2ECC71" label={t('legendAccessible')} />
       <LegendDot color="#F39C12" label={t('legendModerate')}   />
       <LegendDot color="#E74C3C" label={t('legendDifficult')}  />
