@@ -11,9 +11,9 @@ import { scoreToColor, getObstacles } from '../lib/api';
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 
 // ─── Per-route colours (best / alt 1 / alt 2) ───────────────────────────────
-// Designed so the three options are immediately distinguishable on the
-// navy-night basemap and don't clash with the obstacle layer hues below.
-const ROUTE_COLORS = ['#2ECC71', '#3B82F6', '#9333EA']; // green / blue / purple
+// Match the design system's accessible / moderate / difficult tokens —
+// green for the recommended pick, then orange and red for alternatives.
+const ROUTE_COLORS = ['#2ECC71', '#F39C12', '#E74C3C']; // green / orange / red
 
 // ─── Obstruction layer colours ──────────────────────────────────────────────
 const COLORS = {
@@ -494,9 +494,7 @@ export default function MapScreen({ onNavigate, routeData }) {
 
       const map = new mapboxgl.Map({
         container: mapContainerRef.current,
-        // traffic-night-v2 = same dark navigation aesthetic + Mapbox live
-        // traffic congestion overlay (green / orange / red / dark red).
-        style: 'mapbox://styles/mapbox/traffic-night-v2',
+        style: 'mapbox://styles/mapbox/navigation-night-v1',
         center,
         zoom: 13.5,
         attributionControl: false,
@@ -725,13 +723,6 @@ function Legend({ t, showObstacles }) {
       transition={{ delay: 0.25 }}
       className="pointer-events-auto flex flex-col items-stretch gap-1.5 bg-black/40 backdrop-blur-md rounded-2xl px-3 py-2.5 shadow-card border border-white/10 max-w-[210px]"
     >
-      <p className="font-body text-[10px] text-white/55 uppercase tracking-widest font-semibold">
-        {t('legendRouteHeader')}
-      </p>
-      <LegendDot color="#2ECC71" label={t('legendAccessible')} />
-      <LegendDot color="#F39C12" label={t('legendModerate')}   />
-      <LegendDot color="#E74C3C" label={t('legendDifficult')}  />
-
       <AnimatePresence initial={false}>
         {showObstacles && (
           <motion.div
@@ -741,15 +732,14 @@ function Legend({ t, showObstacles }) {
             transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
             className="overflow-hidden"
           >
-            <div className="w-full h-px bg-white/15 my-1" aria-hidden="true" />
             <LegendDot color={COLORS.osm}          label={t('layerOsm')}          />
             <LegendDot color={COLORS.construction} label={t('layerConstruction')} />
             <LegendDot color={COLORS.report}       label={t('layerReports')}      />
+            <div className="w-full h-px bg-white/15 my-1" aria-hidden="true" />
           </motion.div>
         )}
       </AnimatePresence>
 
-      <div className="w-full h-px bg-white/15 my-0.5" aria-hidden="true" />
       <LanguageToggle variant="map" />
     </motion.div>
   );
