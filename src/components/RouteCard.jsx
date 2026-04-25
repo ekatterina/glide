@@ -4,17 +4,6 @@ import { mockRoute } from '../data/mockRoute';
 import { useLanguage } from '../context/LanguageContext';
 import { formatDistance, formatDuration } from '../lib/api';
 
-function speak(text, lang) {
-  if ('speechSynthesis' in window) {
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = lang;
-    utterance.rate = 0.88;
-    utterance.pitch = 1;
-    window.speechSynthesis.speak(utterance);
-  }
-}
-
 const WARNING_ICON = {
   cobblestone: '🪨',
   smoothness: '〰️',
@@ -22,6 +11,39 @@ const WARNING_ICON = {
   wheelchair_limited: '⛔',
   edge_case: '⚠️',
 };
+
+// Google Maps URL Directions API caps `waypoints` at 9 (excluding origin/dest).
+// Sample up to MAX_WAYPOINTS evenly spaced from the interior of our route so
+// Google's planner snaps roughly to the same streets we picked.
+const MAX_WAYPOINTS = 8;
+
+function sampleWaypoints(coords) {
+  if (!coords || coords.length <= 2) return [];
+  const interior = coords.slice(1, -1);
+  if (interior.length <= MAX_WAYPOINTS) return interior;
+  const step = interior.length / MAX_WAYPOINTS;
+  const sampled = [];
+  for (let i = 0; i < MAX_WAYPOINTS; i++) {
+    sampled.push(interior[Math.floor(i * step)]);
+  }
+  return sampled;
+}
+
+function buildGoogleMapsUrl(coords) {
+  // Our coords are GeoJSON [lng, lat]; Google expects "lat,lng" strings.
+  const [originLng, originLat] = coords[0];
+  const [destLng, destLat] = coords[coords.length - 1];
+  const params = new URLSearchParams();
+  params.set('api', '1');
+  params.set('travelmode', 'walking');
+  params.set('origin', `${originLat},${originLng}`);
+  params.set('destination', `${destLat},${destLng}`);
+  const wps = sampleWaypoints(coords);
+  if (wps.length > 0) {
+    params.set('waypoints', wps.map(([lng, lat]) => `${lat},${lng}`).join('|'));
+  }
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
+}
 
 function buildLiveSummary(liveRoute, t) {
   if (!liveRoute) return null;
@@ -51,7 +73,6 @@ export default function RouteCard({ liveRoute }) {
   const { t } = useLanguage();
   const [whyOpen, setWhyOpen] = useState(false);
   const [breakdownOpen, setBreakdownOpen] = useState(false);
-  const [speaking, setSpeaking] = useState(false);
 
   const stats = liveRoute
     ? {
@@ -67,13 +88,13 @@ export default function RouteCard({ liveRoute }) {
         obstacles: mockRoute.obstaclesAvoided,
       };
 
-  const summary = buildLiveSummary(liveRoute, t) ?? t('routeSummary');
   const why = buildLiveSummary(liveRoute, t) ?? t('whyThisRouteText');
 
-  const handleSpeak = () => {
-    setSpeaking(true);
-    speak(summary, t('speechLang'));
-    setTimeout(() => setSpeaking(false), 6000);
+  const handleOpenInGoogleMaps = () => {
+    const coords = liveRoute?.geometry?.coordinates;
+    if (!coords || coords.length < 2) return;
+    const url = buildGoogleMapsUrl(coords);
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   const scoreColor =
@@ -81,7 +102,6 @@ export default function RouteCard({ liveRoute }) {
     : stats.score >= 60 ? 'text-moderate'
     : 'text-difficult';
 
-  // Top 3 waytype slices for the breakdown panel.
   const waytypes = liveRoute?.waytype_breakdown
     ? Object.entries(liveRoute.waytype_breakdown)
         .filter(([, v]) => v.pct >= 1)
@@ -207,23 +227,18 @@ export default function RouteCard({ liveRoute }) {
         )}
       </AnimatePresence>
 
-      {/* Hear-route */}
-      <motion.button
-        whileTap={{ scale: 0.96 }}
-        onClick={handleSpeak}
-        className={`
-          w-full h-12 rounded-xl flex items-center justify-center gap-2 mb-3
-          font-body font-semibold text-sm border-2 transition-all duration-200
-          ${speaking
-            ? 'bg-navy text-cream border-navy'
-            : 'bg-transparent text-navy border-navy/20 hover:border-navy/50'
-          }
-        `}
-        aria-label={t('hearRoute')}
-      >
-        <MicIcon speaking={speaking} />
-        {t('hearRoute')}
-      </motion.button>
+      {/* Open in Google Maps — only when there's a real planned route */}
+      {liveRoute && (
+        <motion.button
+          whileTap={{ scale: 0.96 }}
+          onClick={handleOpenInGoogleMaps}
+          className="w-full h-12 rounded-xl bg-navy text-cream font-body font-semibold text-sm flex items-center justify-center gap-2 mb-3 shadow-card"
+        >
+          <GoogleMapsIcon />
+          {t('openInGoogleMaps')}
+          <ExternalIcon />
+        </motion.button>
+      )}
 
       {/* Why this route */}
       <button
@@ -272,16 +287,23 @@ function InfoIcon() {
   );
 }
 
-function MicIcon({ speaking }) {
+function GoogleMapsIcon() {
+  // Stylised pin — deliberately not Google's real logo to stay clear of trademark misuse.
   return (
     <svg viewBox="0 0 20 20" fill="none" className="w-4 h-4" aria-hidden="true">
-      <rect
-        x="7" y="2" width="6" height="9" rx="3"
-        stroke="currentColor" strokeWidth="1.5"
-        className={speaking ? 'animate-pulse' : ''}
-      />
-      <path d="M4 10a6 6 0 0012 0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      <path d="M10 16v2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="M10 2C7 2 4.5 4.4 4.5 7.4c0 4 5.5 10.6 5.5 10.6s5.5-6.6 5.5-10.6C15.5 4.4 13 2 10 2z"
+            stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <circle cx="10" cy="7.5" r="2" fill="currentColor" />
+    </svg>
+  );
+}
+
+function ExternalIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="w-3.5 h-3.5 opacity-70" aria-hidden="true">
+      <path d="M11 4h5v5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M16 4l-7 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M14 11v4a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

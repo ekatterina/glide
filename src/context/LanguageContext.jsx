@@ -78,6 +78,7 @@ const translations = {
     wt_cycleway: 'on shared cycleway',
     hearRoute: 'Hear route',
     viewSteps: 'View steps',
+    openInGoogleMaps: 'Open in Google Maps',
     whyThisRouteTitle: 'Why this route?',
     whyThisRouteText:
       'This route avoids the cobblestones on Nieuwe Hoogstraat and the narrow passage near the Stopera. We chose Plantage Middenlaan for its wide, paved pavements and lowered kerbs at every crossing. The detour from the shortest route is only 4 extra minutes.',
@@ -215,6 +216,7 @@ const translations = {
     wt_cycleway: 'op gedeeld fietspad',
     hearRoute: 'Hoor de route',
     viewSteps: 'Bekijk stappen',
+    openInGoogleMaps: 'Open in Google Maps',
     whyThisRouteTitle: 'Waarom deze route?',
     whyThisRouteText:
       'Deze route vermijdt de keienbestrating op de Nieuwe Hoogstraat en de smalle doorgang bij de Stopera. We kozen voor de Plantage Middenlaan vanwege de brede, verharde stoepen en verlaagde stoepkanten bij elke kruising. De afwijking van de kortste route is slechts 4 minuten extra.',
