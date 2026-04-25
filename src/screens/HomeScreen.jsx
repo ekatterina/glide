@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import mapboxgl from 'mapbox-gl';
 import LanguageToggle from '../components/LanguageToggle';
 import GlideLogo from '../components/GlideLogo';
 import { useLanguage } from '../context/LanguageContext';
 import { routeSegments } from '../data/mockRoute';
+import { searchRoute, ApiError } from '../lib/api';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 
@@ -29,10 +30,12 @@ function makePinEl() {
   return el;
 }
 
-export default function HomeScreen({ onNavigate }) {
+export default function HomeScreen({ onNavigate, onRoutePlanned, existingRoute }) {
   const { t } = useLanguage();
-  const [from, setFrom] = useState('Dam Square, Amsterdam');
-  const [to, setTo] = useState('Artis Royal Zoo');
+  const [from, setFrom] = useState(existingRoute?.from?.display_name ?? 'Albert Cuypstraat 67, Amsterdam');
+  const [to, setTo] = useState(existingRoute?.to?.display_name ?? 'Vondelpark, Amsterdam');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
 
@@ -73,6 +76,25 @@ export default function HomeScreen({ onNavigate }) {
     };
   }, []);
 
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (loading) return;
+    setError(null);
+    setLoading(true);
+    try {
+      const data = await searchRoute(from, to);
+      onRoutePlanned(data);
+      onNavigate('map');
+    } catch (err) {
+      const msg = err instanceof ApiError
+        ? (err.status === 404 ? t('errAddressNotFound') : err.message || t('errRouting'))
+        : t('errNetwork');
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="relative w-full h-full overflow-hidden">
       {/* Map background */}
@@ -103,7 +125,8 @@ export default function HomeScreen({ onNavigate }) {
       </motion.div>
 
       {/* Input card overlay */}
-      <motion.div
+      <motion.form
+        onSubmit={handleSubmit}
         initial={{ y: 60, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ delay: 0.2, duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
@@ -135,7 +158,8 @@ export default function HomeScreen({ onNavigate }) {
             value={from}
             onChange={(e) => setFrom(e.target.value)}
             placeholder={t('fromPlaceholder')}
-            className="w-full h-14 pl-12 pr-4 rounded-2xl bg-white border-2 border-navy/8 focus:border-navy/60 font-body text-navy text-sm placeholder:text-navy/30 outline-none transition-colors shadow-soft"
+            disabled={loading}
+            className="w-full h-14 pl-12 pr-4 rounded-2xl bg-white border-2 border-navy/8 focus:border-navy/60 font-body text-navy text-sm placeholder:text-navy/30 outline-none transition-colors shadow-soft disabled:opacity-60"
           />
         </div>
 
@@ -155,20 +179,47 @@ export default function HomeScreen({ onNavigate }) {
             value={to}
             onChange={(e) => setTo(e.target.value)}
             placeholder={t('toPlaceholder')}
-            className="w-full h-14 pl-12 pr-4 rounded-2xl bg-white border-2 border-navy/8 focus:border-navy/60 font-body text-navy text-sm placeholder:text-navy/30 outline-none transition-colors shadow-soft"
+            disabled={loading}
+            className="w-full h-14 pl-12 pr-4 rounded-2xl bg-white border-2 border-navy/8 focus:border-navy/60 font-body text-navy text-sm placeholder:text-navy/30 outline-none transition-colors shadow-soft disabled:opacity-60"
           />
         </div>
 
+        {/* Inline error */}
+        <AnimatePresence>
+          {error && (
+            <motion.div
+              initial={{ opacity: 0, y: -4, height: 0 }}
+              animate={{ opacity: 1, y: 0, height: 'auto' }}
+              exit={{ opacity: 0, y: -4, height: 0 }}
+              className="overflow-hidden mb-3"
+            >
+              <div className="px-4 py-2.5 rounded-xl bg-difficult/10 border border-difficult/30 font-body text-xs text-difficult">
+                {error}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* CTA */}
         <motion.button
-          whileTap={{ scale: 0.97 }}
-          onClick={() => onNavigate('map')}
-          className="w-full h-14 rounded-2xl bg-navy text-cream font-display font-bold text-base flex items-center justify-center gap-2.5 shadow-card active:shadow-none transition-shadow"
+          type="submit"
+          whileTap={{ scale: loading ? 1 : 0.97 }}
+          disabled={loading}
+          className="w-full h-14 rounded-2xl bg-navy text-cream font-display font-bold text-base flex items-center justify-center gap-2.5 shadow-card active:shadow-none transition-shadow disabled:opacity-80"
         >
-          <SearchIcon />
-          {t('ctaButton')}
+          {loading ? (
+            <>
+              <SpinnerIcon />
+              {t('searching')}
+            </>
+          ) : (
+            <>
+              <SearchIcon />
+              {t('ctaButton')}
+            </>
+          )}
         </motion.button>
-      </motion.div>
+      </motion.form>
     </div>
   );
 }
@@ -196,6 +247,14 @@ function SearchIcon() {
     <svg viewBox="0 0 20 20" fill="none" className="w-5 h-5" aria-hidden="true">
       <circle cx="9" cy="9" r="5" stroke="currentColor" strokeWidth="1.8"/>
       <path d="M13 13l3 3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
+function SpinnerIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="w-5 h-5 animate-spin" aria-hidden="true">
+      <circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeDasharray="12 36" opacity="0.85" />
     </svg>
   );
 }

@@ -7,6 +7,7 @@ import RouteCard from '../components/RouteCard';
 import LanguageToggle from '../components/LanguageToggle';
 import { useLanguage } from '../context/LanguageContext';
 import { routeSegments, fullRouteCoordinates } from '../data/mockRoute';
+import { scoreToColor } from '../lib/api';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 
@@ -42,19 +43,21 @@ const streets = [
   [[4.910,52.380],[4.910,52.360]],
 ];
 
-function SvgMapFallback() {
+function SvgMapFallback({ liveCoords }) {
   const { t } = useLanguage();
+  const sourceCoords = liveCoords ?? fullRouteCoordinates;
+  const sourceSegments = liveCoords ? null : routeSegments.features;
   const [animStep, setAnimStep] = useState(1);
 
   useEffect(() => {
-    if (animStep >= fullRouteCoordinates.length) return;
+    if (animStep >= sourceCoords.length) return;
     const timer = setTimeout(() => setAnimStep((s) => s + 1), 60);
     return () => clearTimeout(timer);
-  }, [animStep]);
+  }, [animStep, sourceCoords.length]);
 
-  const animCoords = fullRouteCoordinates.slice(0, animStep);
-  const [sx, sy] = project(fullRouteCoordinates[0]);
-  const [ex, ey] = project(fullRouteCoordinates[fullRouteCoordinates.length - 1]);
+  const animCoords = sourceCoords.slice(0, animStep);
+  const [sx, sy] = project(sourceCoords[0]);
+  const [ex, ey] = project(sourceCoords[sourceCoords.length - 1]);
 
   return (
     <div className="absolute inset-0 bg-[#EAE6DB]">
@@ -65,28 +68,31 @@ function SvgMapFallback() {
         {canals.map((pts, i) => (
           <polyline key={`cn-${i}`} points={coordsToPolyline(pts)} stroke="#A8C4D4" strokeWidth="8" fill="none" strokeLinecap="round" opacity="0.75" />
         ))}
-        {routeSegments.features.map((feat, i) => (
+        {sourceSegments && sourceSegments.map((feat, i) => (
           <polyline key={`sg-${i}`} points={coordsToPolyline(feat.geometry.coordinates)} stroke={feat.properties.color} strokeWidth="10" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity="0.9" />
         ))}
+        {!sourceSegments && (
+          <polyline points={coordsToPolyline(sourceCoords)} stroke="#2ECC71" strokeWidth="10" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity="0.9" />
+        )}
         {animCoords.length > 1 && (
-          <polyline points={coordsToPolyline(animCoords)} stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity={animStep < fullRouteCoordinates.length ? 0.65 : 0} style={{ transition: 'opacity 1s' }} />
+          <polyline points={coordsToPolyline(animCoords)} stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity={animStep < sourceCoords.length ? 0.65 : 0} style={{ transition: 'opacity 1s' }} />
         )}
         <circle cx={sx} cy={sy} r="10" fill="#0F1F3D" />
         <circle cx={sx} cy={sy} r="5"  fill="white" />
         <circle cx={ex} cy={ey} r="10" fill="#2ECC71" />
         <circle cx={ex} cy={ey} r="5"  fill="white" />
-        <text x={sx + 14} y={sy + 5}   fontFamily="Syne, sans-serif" fontWeight="700" fontSize="11" fill="#0F1F3D">Dam Square</text>
-        <text x={ex - 58} y={ey - 14}  fontFamily="Syne, sans-serif" fontWeight="700" fontSize="11" fill="#0F1F3D">Artis Zoo</text>
       </svg>
-      <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-navy/80 backdrop-blur-sm text-cream text-xs font-body font-medium px-3 py-1.5 rounded-full pointer-events-none whitespace-nowrap">
-        {t('demoNotice')}
-      </div>
+      {!liveCoords && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-navy/80 backdrop-blur-sm text-cream text-xs font-body font-medium px-3 py-1.5 rounded-full pointer-events-none whitespace-nowrap">
+          {t('demoNotice')}
+        </div>
+      )}
     </div>
   );
 }
 
-// ─── Mapbox route setup ──────────────────────────────────────────────────────
-function setupRouteAnimation(map, intervalRef) {
+// ─── Mapbox route setup (mock-data demo path, kept for offline preview) ─────
+function setupMockRouteAnimation(map, intervalRef) {
   routeSegments.features.forEach((feat, i) => {
     map.addSource(`seg-${i}`, { type: 'geojson', data: feat });
     map.addLayer({
@@ -98,7 +104,6 @@ function setupRouteAnimation(map, intervalRef) {
     });
   });
 
-  // Animated drawing overlay
   map.addSource('route-draw', {
     type: 'geojson',
     data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [fullRouteCoordinates[0]] } },
@@ -127,7 +132,6 @@ function setupRouteAnimation(map, intervalRef) {
     step++;
   }, 70);
 
-  // Markers
   const mkEl = (bg) => {
     const el = document.createElement('div');
     el.style.cssText = `width:14px;height:14px;border-radius:50%;background:${bg};border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,.5)`;
@@ -137,8 +141,67 @@ function setupRouteAnimation(map, intervalRef) {
   new mapboxgl.Marker({ element: mkEl('#2ECC71') }).setLngLat(fullRouteCoordinates[fullRouteCoordinates.length - 1]).addTo(map);
 }
 
+// ─── Mapbox route setup (live data from glide-backend) ──────────────────────
+function setupLiveRouteAnimation(map, intervalRef, route) {
+  const coords = route.geometry.coordinates;
+  const color = scoreToColor(route.accessibility_score);
+
+  map.addSource('live-route', { type: 'geojson', data: route.geometry });
+  map.addLayer({
+    id: 'live-route',
+    type: 'line',
+    source: 'live-route',
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': color, 'line-width': 8, 'line-opacity': 0.95 },
+  });
+
+  map.addSource('route-draw', {
+    type: 'geojson',
+    data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [coords[0]] } },
+  });
+  map.addLayer({
+    id: 'route-draw',
+    type: 'line',
+    source: 'route-draw',
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': '#ffffff', 'line-width': 3, 'line-opacity': 0.7 },
+  });
+
+  let step = 1;
+  intervalRef.current = setInterval(() => {
+    if (step >= coords.length) {
+      clearInterval(intervalRef.current);
+      setTimeout(() => {
+        if (map.getLayer('route-draw')) map.setPaintProperty('route-draw', 'line-opacity', 0);
+      }, 600);
+      return;
+    }
+    map.getSource('route-draw').setData({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: coords.slice(0, step + 1) },
+    });
+    step++;
+  }, 70);
+
+  const mkEl = (bg) => {
+    const el = document.createElement('div');
+    el.style.cssText = `width:14px;height:14px;border-radius:50%;background:${bg};border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,.5)`;
+    return el;
+  };
+  new mapboxgl.Marker({ element: mkEl('#0F1F3D') }).setLngLat(coords[0]).addTo(map);
+  new mapboxgl.Marker({ element: mkEl('#2ECC71') }).setLngLat(coords[coords.length - 1]).addTo(map);
+
+  // Fit bounds to the route with a little padding for the bottom sheet.
+  const lngs = coords.map((c) => c[0]);
+  const lats = coords.map((c) => c[1]);
+  map.fitBounds(
+    [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+    { padding: { top: 80, bottom: 360, left: 40, right: 40 }, duration: 700 },
+  );
+}
+
 // ─── Screen component ────────────────────────────────────────────────────────
-export default function MapScreen({ onNavigate }) {
+export default function MapScreen({ onNavigate, routeData }) {
   const { t } = useLanguage();
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
@@ -147,6 +210,9 @@ export default function MapScreen({ onNavigate }) {
   const [mapError, setMapError] = useState(!MAPBOX_TOKEN);
   const [showDirections, setShowDirections] = useState(false);
 
+  const liveRoute = routeData?.routes?.[0] ?? null;
+  const liveCoords = liveRoute?.geometry?.coordinates ?? null;
+
   useEffect(() => {
     if (!MAPBOX_TOKEN) return;
 
@@ -154,11 +220,14 @@ export default function MapScreen({ onNavigate }) {
     mapboxgl.accessToken = MAPBOX_TOKEN;
 
     try {
+      const center = liveCoords
+        ? liveCoords[Math.floor(liveCoords.length / 2)]
+        : [4.9041, 52.3676];
+
       const map = new mapboxgl.Map({
         container: mapContainerRef.current,
-        // Dark navy style that complements the app palette
         style: 'mapbox://styles/mapbox/navigation-night-v1',
-        center: [4.9041, 52.3676],
+        center,
         zoom: 13.5,
         attributionControl: false,
         logoPosition: 'bottom-right',
@@ -168,7 +237,11 @@ export default function MapScreen({ onNavigate }) {
 
       map.on('load', () => {
         if (!mounted) return;
-        setupRouteAnimation(map, intervalRef);
+        if (liveRoute) {
+          setupLiveRouteAnimation(map, intervalRef, liveRoute);
+        } else {
+          setupMockRouteAnimation(map, intervalRef);
+        }
         setMapReady(true);
       });
 
@@ -184,15 +257,20 @@ export default function MapScreen({ onNavigate }) {
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveRoute]);
 
   const showFallback = mapError || !MAPBOX_TOKEN;
+
+  // From / To labels in the bottom sheet — prefer real geocoded names.
+  const fromLabel = routeData?.from?.display_name?.split(',')[0] ?? t('routeFrom');
+  const toLabel = routeData?.to?.display_name?.split(',')[0] ?? t('routeTo');
 
   return (
     <div className="relative w-full h-full bg-[#0F1F3D] overflow-hidden">
       {/* Map */}
       {showFallback ? (
-        <SvgMapFallback />
+        <SvgMapFallback liveCoords={liveCoords} />
       ) : (
         <div ref={mapContainerRef} className="absolute inset-0" />
       )}
@@ -251,17 +329,17 @@ export default function MapScreen({ onNavigate }) {
           {/* Origin → Destination */}
           <div className="flex items-center gap-2 mb-4 overflow-hidden">
             <span className="font-body text-sm text-navy/50 font-medium truncate flex-shrink-0">
-              {t('routeFrom')}
+              {fromLabel}
             </span>
             <svg viewBox="0 0 16 16" fill="none" className="w-4 h-4 flex-shrink-0" aria-hidden="true">
               <path d="M3 8h10M9 4l4 4-4 4" stroke="#0F1F3D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.4" />
             </svg>
             <span className="font-body text-sm text-navy font-semibold truncate">
-              {t('routeTo')}
+              {toLabel}
             </span>
           </div>
 
-          <RouteCard onViewSteps={() => setShowDirections(true)} />
+          <RouteCard onViewSteps={() => setShowDirections(true)} liveRoute={liveRoute} />
         </div>
       </motion.div>
 

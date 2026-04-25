@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { mockRoute } from '../data/mockRoute';
 import { useLanguage } from '../context/LanguageContext';
+import { formatDistance, formatDuration } from '../lib/api';
 
 function speak(text, lang) {
   if ('speechSynthesis' in window) {
@@ -14,23 +15,68 @@ function speak(text, lang) {
   }
 }
 
-export default function RouteCard({ onViewSteps }) {
+/**
+ * Build a one-paragraph summary of the live route — feeds the "Why this route?"
+ * panel and the speech-synthesis "Hear route" button. Falls back to the
+ * pre-translated copy when there's no live route yet (initial demo state).
+ */
+function buildLiveSummary(liveRoute, t) {
+  if (!liveRoute) return null;
+
+  const distance = formatDistance(liveRoute.distance_m);
+  const duration = formatDuration(liveRoute.duration_s);
+  const score = liveRoute.accessibility_score;
+  const warnings = liveRoute.warnings ?? [];
+  const breakdown = liveRoute.waytype_breakdown ?? {};
+  const topWaytype = Object.entries(breakdown)
+    .filter(([, v]) => v.pct >= 1)
+    .sort(([, a], [, b]) => b.pct - a.pct)[0];
+
+  let summary = `${t('liveRouteScorePrefix')} ${score}/100. ${distance}, ${duration}.`;
+  if (topWaytype) {
+    summary += ` ${topWaytype[1].pct}% ${t(`wt_${topWaytype[0]}`) || topWaytype[0]}.`;
+  }
+  if (warnings.length > 0) {
+    summary += ` ${warnings.length} ${warnings.length === 1 ? t('warningSingular') : t('warningPlural')}.`;
+  } else {
+    summary += ` ${t('noIssuesFlagged')}.`;
+  }
+  return summary;
+}
+
+export default function RouteCard({ onViewSteps, liveRoute }) {
   const { t } = useLanguage();
   const [whyOpen, setWhyOpen] = useState(false);
   const [speaking, setSpeaking] = useState(false);
 
+  // Live or fallback values for the three stat tiles.
+  const stats = liveRoute
+    ? {
+        score: liveRoute.accessibility_score,
+        time: formatDuration(liveRoute.duration_s),
+        distance: formatDistance(liveRoute.distance_m),
+        obstacles: liveRoute.warnings?.length ?? 0,
+      }
+    : {
+        score: mockRoute.accessibilityScore,
+        time: mockRoute.estimatedTime,
+        distance: mockRoute.distance,
+        obstacles: mockRoute.obstaclesAvoided,
+      };
+
+  const summary = buildLiveSummary(liveRoute, t) ?? t('routeSummary');
+  const why = buildLiveSummary(liveRoute, t) ?? t('whyThisRouteText');
+
   const handleSpeak = () => {
     setSpeaking(true);
-    speak(t('routeSummary'), t('speechLang'));
+    speak(summary, t('speechLang'));
     setTimeout(() => setSpeaking(false), 6000);
   };
 
   const scoreColor =
-    mockRoute.accessibilityScore >= 80
-      ? 'text-accessible'
-      : mockRoute.accessibilityScore >= 60
-      ? 'text-moderate'
-      : 'text-difficult';
+    stats.score >= 80 ? 'text-accessible'
+    : stats.score >= 60 ? 'text-moderate'
+    : 'text-difficult';
 
   return (
     <div className="w-full">
@@ -41,10 +87,10 @@ export default function RouteCard({ onViewSteps }) {
             {t('accessibilityStatLabel')}
           </span>
           <span className={`font-display font-bold text-2xl ${scoreColor}`}>
-            {mockRoute.accessibilityScore}%
+            {stats.score}{liveRoute ? '' : '%'}
           </span>
           <span className="font-body text-xs text-navy/50">
-            {t('accessibilityStatSuffix').replace('%', '').trim()}
+            {liveRoute ? t('accessibilityStatLiveSuffix') : t('accessibilityStatSuffix').replace('%', '').trim()}
           </span>
         </div>
 
@@ -53,19 +99,21 @@ export default function RouteCard({ onViewSteps }) {
             {t('timeStatLabel')}
           </span>
           <span className="font-display font-bold text-2xl text-navy">
-            {mockRoute.estimatedTime}
+            {stats.time}
           </span>
-          <span className="font-body text-xs text-navy/50">{mockRoute.distance}</span>
+          <span className="font-body text-xs text-navy/50">{stats.distance}</span>
         </div>
 
         <div className="flex-1 bg-navy/5 rounded-2xl px-4 py-3 flex flex-col gap-0.5">
           <span className="font-body text-xs text-navy/50 font-medium">
-            {t('obstacleStatLabel')}
+            {liveRoute ? t('warningStatLabel') : t('obstacleStatLabel')}
           </span>
           <span className="font-display font-bold text-2xl text-navy">
-            {mockRoute.obstaclesAvoided}
+            {stats.obstacles}
           </span>
-          <span className="font-body text-xs text-navy/50">{t('obstacleStatSuffix')}</span>
+          <span className="font-body text-xs text-navy/50">
+            {liveRoute ? t('warningStatSuffix') : t('obstacleStatSuffix')}
+          </span>
         </div>
       </div>
 
@@ -125,8 +173,18 @@ export default function RouteCard({ onViewSteps }) {
           >
             <div className="pt-2 pb-1 px-4">
               <p className="font-body text-sm text-navy/70 leading-relaxed">
-                {t('whyThisRouteText')}
+                {why}
               </p>
+              {liveRoute?.warnings?.length > 0 && (
+                <ul className="mt-3 space-y-1.5">
+                  {liveRoute.warnings.slice(0, 4).map((w, i) => (
+                    <li key={i} className="font-body text-xs text-navy/60 flex items-start gap-2">
+                      <span className="mt-1 w-1.5 h-1.5 rounded-full bg-moderate flex-shrink-0" />
+                      <span>{w.message}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </motion.div>
         )}

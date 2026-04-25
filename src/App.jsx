@@ -19,6 +19,10 @@ export default function App() {
   const [screen, setScreen] = useState('home');
   const [direction, setDirection] = useState(1);
 
+  // Live route data — populated by HomeScreen, consumed by MapScreen / DirectionsScreen.
+  // Shape: { from, to, routes: ScoredRoute[] } from glide-backend /api/route.
+  const [routeData, setRouteData] = useState(null);
+
   const navigateTo = (target) => {
     const fromIdx = SCREEN_ORDER.indexOf(screen);
     const toIdx = SCREEN_ORDER.indexOf(target);
@@ -27,8 +31,14 @@ export default function App() {
   };
 
   const screens = {
-    home: <HomeScreen onNavigate={navigateTo} />,
-    map: <MapScreen onNavigate={navigateTo} />,
+    home: (
+      <HomeScreen
+        onNavigate={navigateTo}
+        onRoutePlanned={setRouteData}
+        existingRoute={routeData}
+      />
+    ),
+    map: <MapScreen onNavigate={navigateTo} routeData={routeData} />,
     report: <ReportScreen onNavigate={navigateTo} />,
   };
 
