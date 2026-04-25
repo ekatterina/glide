@@ -22,30 +22,6 @@ const COLORS = {
   report: '#EC4899',        // pink-500  — community reports
 };
 
-// Categories shown beneath each layer's name in the legend.
-// Same colour as the layer dot — only the icon distinguishes the type.
-const LAYER_DETAILS = {
-  osm: [
-    { icon: '🪨', key: 'osm_cobblestone' },
-    { icon: '🪜', key: 'osm_steps' },
-    { icon: '⛔', key: 'osm_wheelchair_no' },
-    { icon: '↔️', key: 'osm_narrow' },
-    { icon: '🚧', key: 'osm_barriers' },
-    { icon: '⛰️', key: 'osm_steep' },
-  ],
-  construction: [
-    { icon: '🏗️', key: 'wior_active' },
-  ],
-  report: [
-    { icon: '🚲', key: 'cat_parked_bikes' },
-    { icon: '🕳️', key: 'cat_broken_pavement' },
-    { icon: '🏗️', key: 'cat_scaffolding' },
-    { icon: '🚗', key: 'cat_parked_car' },
-    { icon: '💧', key: 'cat_flood' },
-    { icon: '🗑️', key: 'cat_trash' },
-  ],
-};
-
 // ─── SVG fallback map (shown when token is absent) ──────────────────────────
 const BOUNDS = { lngMin: 4.886, lngMax: 4.924, latMin: 52.360, latMax: 52.380 };
 const SVG_W = 390;
@@ -769,24 +745,9 @@ function Legend({ t, showObstacles }) {
             className="overflow-hidden"
           >
             <div className="w-full h-px bg-white/15 my-1" aria-hidden="true" />
-            <LayerSection
-              color={COLORS.osm}
-              label={t('layerOsm')}
-              items={LAYER_DETAILS.osm}
-              t={t}
-            />
-            <LayerSection
-              color={COLORS.construction}
-              label={t('layerConstruction')}
-              items={LAYER_DETAILS.construction}
-              t={t}
-            />
-            <LayerSection
-              color={COLORS.report}
-              label={t('layerReports')}
-              items={LAYER_DETAILS.report}
-              t={t}
-            />
+            <LegendDot color={COLORS.osm}          label={t('layerOsm')}          />
+            <LegendDot color={COLORS.construction} label={t('layerConstruction')} />
+            <LegendDot color={COLORS.report}       label={t('layerReports')}      />
           </motion.div>
         )}
       </AnimatePresence>
@@ -802,29 +763,6 @@ function LegendDot({ color, label }) {
     <div className="flex items-center gap-2.5 w-full">
       <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: color }} aria-hidden="true" />
       <span className="font-body text-xs text-white/85 font-medium">{label}</span>
-    </div>
-  );
-}
-
-function LayerSection({ color, label, items, t }) {
-  return (
-    <div className="mt-1.5">
-      <div className="flex items-center gap-2 mb-1">
-        <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: color }} aria-hidden="true" />
-        <span className="font-body text-xs text-white/85 font-semibold">{label}</span>
-      </div>
-      <div className="flex flex-wrap gap-1 pl-5">
-        {items.map((it) => (
-          <span
-            key={it.key}
-            title={t(it.key) || it.key}
-            className="text-sm leading-none select-none"
-            aria-label={t(it.key) || it.key}
-          >
-            {it.icon}
-          </span>
-        ))}
-      </div>
     </div>
   );
 }
