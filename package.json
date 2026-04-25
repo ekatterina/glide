@@ -4,8 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "concurrently -n client,server -c green,cyan \"npm:dev:client\" \"npm:dev:server\"",
+    "dev:client": "vite",
+    "dev:server": "npm --prefix server run dev",
+    "build": "npm:build:client && npm:build:server",
+    "build:client": "vite build",
+    "build:server": "npm --prefix server run build",
+    "install:all": "npm install && npm --prefix server install",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -17,6 +22,7 @@
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.19",
+    "concurrently": "^9.1.0",
     "postcss": "^8.4.40",
     "tailwindcss": "^3.4.7",
     "vite": "^5.3.5"

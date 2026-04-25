@@ -1,0 +1,22 @@
+{
+  "_comment": "Seeded crowdsourced obstacle reports. Edit by hand to add more — re-run scripts/explore_amsterdam.py to refresh the map. Coordinates are [lat, lng]. Categories must match the CATEGORIES dict in the script.",
+  "reports": [
+    { "id": "r-001", "lat": 52.3548, "lng": 4.8920, "category": "parked_bikes",     "note": "5+ bikes locked along railing, narrows sidewalk to ~50cm",      "reported_at": "2026-04-22" },
+    { "id": "r-002", "lat": 52.3555, "lng": 4.8910, "category": "broken_pavement",  "note": "Heaved tiles around tree roots, ~2m of bumpy section",         "reported_at": "2026-04-23" },
+    { "id": "r-003", "lat": 52.3563, "lng": 4.8945, "category": "parked_bikes",     "note": "Bike storage overflow blocks crossing approach",              "reported_at": "2026-04-21" },
+    { "id": "r-004", "lat": 52.3560, "lng": 4.8895, "category": "narrow_passage",   "note": "Two bollards 90cm apart — manual chair barely fits",          "reported_at": "2026-04-20" },
+    { "id": "r-005", "lat": 52.3552, "lng": 4.8880, "category": "trash",            "note": "Containers placed on sidewalk Tuesday/Friday",                "reported_at": "2026-04-15" },
+    { "id": "r-006", "lat": 52.3570, "lng": 4.8912, "category": "missing_kerb_ramp","note": "No dropped kerb at this corner — 8cm step",                  "reported_at": "2026-04-19" },
+    { "id": "r-007", "lat": 52.3540, "lng": 4.8905, "category": "scaffolding",      "note": "New scaffold up ~3 weeks, blocks half the path",              "reported_at": "2026-04-24" },
+    { "id": "r-008", "lat": 52.3675, "lng": 4.8895, "category": "broken_pavement",  "note": "Sunken paving near canal edge, water collects",               "reported_at": "2026-04-18" },
+    { "id": "r-009", "lat": 52.3712, "lng": 4.8902, "category": "parked_bikes",     "note": "Constant bike clutter near tram stop",                        "reported_at": "2026-04-22" },
+    { "id": "r-010", "lat": 52.3722, "lng": 4.8960, "category": "narrow_passage",   "note": "Alley pinches to <100cm at this point",                       "reported_at": "2026-04-17" },
+    { "id": "r-011", "lat": 52.3699, "lng": 4.8975, "category": "temp_fence",       "note": "Festival fencing in place this weekend",                      "reported_at": "2026-04-24" },
+    { "id": "r-012", "lat": 52.3683, "lng": 4.8940, "category": "parked_car",       "note": "Cars on sidewalk near loading bay, daily occurrence",         "reported_at": "2026-04-16" },
+    { "id": "r-013", "lat": 52.3760, "lng": 4.8888, "category": "flood",            "note": "Drain backs up after heavy rain — large puddle here",         "reported_at": "2026-04-21" },
+    { "id": "r-014", "lat": 52.3550, "lng": 4.8970, "category": "street_furniture", "note": "Café A-boards reduce passable width to ~120cm",               "reported_at": "2026-04-20" },
+    { "id": "r-015", "lat": 52.3705, "lng": 4.8930, "category": "scaffolding",      "note": "Building renovation, scaffold + materials on sidewalk",       "reported_at": "2026-04-23" },
+    { "id": "r-016", "lat": 52.3735, "lng": 4.8902, "category": "misc",             "note": "Some kind of metal grating sticking up — couldn't classify",  "reported_at": "2026-04-24" },
+    { "id": "r-017", "lat": 52.3548, "lng": 4.8888, "category": "misc",             "note": "Strong sewer smell / dampness, possibly a sinkhole forming",  "reported_at": "2026-04-22" }
+  ]
+}
