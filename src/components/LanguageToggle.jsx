@@ -18,7 +18,7 @@ export default function LanguageToggle({ variant = 'light' }) {
         font-body text-xs font-bold tracking-wider
         transition-colors select-none
         ${variant === 'map'
-          ? 'bg-navy/7 text-navy hover:bg-navy/12'
+          ? 'bg-white/10 text-white hover:bg-white/20'
           : 'bg-navy/8 text-navy border border-navy/10 hover:bg-navy/14'
         }
       `}

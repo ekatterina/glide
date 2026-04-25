@@ -2,10 +2,6 @@ import { createContext, useContext, useState } from 'react';
 
 const translations = {
   en: {
-    // Brand
-    brand: 'RouteVrij',
-    brandCity: 'Amsterdam',
-
     // HomeScreen
     headline1: 'Your city,',
     headline2: 'your route.',
@@ -70,13 +66,23 @@ const translations = {
     step_6_note: 'Trees on pavement — passable but slightly narrower',
     step_7_note: 'Excellent surface, wide pavement, flat profile',
     step_8_note: 'Wheelchair-accessible entrance right of the main gate',
+
+    // ReportScreen
+    reportTitle: 'Report obstruction',
+    reportPrompt: 'Take a photo of the obstruction',
+    reportCaptureBtn: 'Take photo',
+    reportDemoBtn: 'Skip — use demo image',
+    reportAnalyzing: 'Analysing obstruction…',
+    reportVerdictLabel: 'AI verdict',
+    reportVerdictTitle: 'Blocked kerb cut detected',
+    reportConfidenceLabel: '94% confidence',
+    reportConfirm: 'Confirm & report',
+    reportCancel: 'Cancel',
+    reportSuccessTitle: 'Added to the map.',
+    reportSuccessText: 'Thank you for making Amsterdam more accessible.',
   },
 
   nl: {
-    // Brand
-    brand: 'RouteVrij',
-    brandCity: 'Amsterdam',
-
     // HomeScreen
     headline1: 'Jouw stad,',
     headline2: 'jouw route.',
@@ -141,6 +147,20 @@ const translations = {
     step_6_note: 'Bomen op stoep — rijdbaar maar iets smaller',
     step_7_note: 'Uitstekend verhard, brede stoep, vlak profiel',
     step_8_note: 'Rolstoeltoegankelijke ingang rechts van de hoofdpoort',
+
+    // ReportScreen
+    reportTitle: 'Obstructie melden',
+    reportPrompt: 'Maak een foto van de obstructie',
+    reportCaptureBtn: 'Maak foto',
+    reportDemoBtn: 'Overslaan — gebruik demo-afbeelding',
+    reportAnalyzing: 'Obstructie analyseren…',
+    reportVerdictLabel: 'AI-oordeel',
+    reportVerdictTitle: 'Afgesloten stoeprand gedetecteerd',
+    reportConfidenceLabel: '94% betrouwbaar',
+    reportConfirm: 'Bevestig & meld',
+    reportCancel: 'Annuleer',
+    reportSuccessTitle: 'Toegevoegd aan de kaart.',
+    reportSuccessText: 'Bedankt voor het toegankelijker maken van Amsterdam.',
   },
 };
 

@@ -3,9 +3,9 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { LanguageProvider } from './context/LanguageContext';
 import HomeScreen from './screens/HomeScreen';
 import MapScreen from './screens/MapScreen';
-import DirectionsScreen from './screens/DirectionsScreen';
+import ReportScreen from './screens/ReportScreen';
 
-const SCREEN_ORDER = ['home', 'map', 'directions'];
+const SCREEN_ORDER = ['home', 'map', 'report'];
 
 const slideVariants = {
   enter: (dir) => ({ x: dir > 0 ? '100%' : '-100%', opacity: 0 }),
@@ -29,7 +29,7 @@ export default function App() {
   const screens = {
     home: <HomeScreen onNavigate={navigateTo} />,
     map: <MapScreen onNavigate={navigateTo} />,
-    directions: <DirectionsScreen onNavigate={navigateTo} />,
+    report: <ReportScreen onNavigate={navigateTo} />,
   };
 
   return (
