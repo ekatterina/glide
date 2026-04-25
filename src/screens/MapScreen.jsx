@@ -10,12 +10,40 @@ import { scoreToColor, getObstacles } from '../lib/api';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 
+// ─── Per-route colours (best / alt 1 / alt 2) ───────────────────────────────
+// Designed so the three options are immediately distinguishable on the
+// navy-night basemap and don't clash with the obstacle layer hues below.
+const ROUTE_COLORS = ['#2ECC71', '#3B82F6', '#9333EA']; // green / blue / purple
+
 // ─── Obstruction layer colours ──────────────────────────────────────────────
-// Three distinct hues so the layers read at a glance on the navy-night map.
 const COLORS = {
-  osm: '#94A3B8',           // slate-400 — permanent OSM data ("kadaster-like")
-  construction: '#F59E0B',  // amber-500 — live construction (WIOR)
+  osm: '#94A3B8',           // slate-400 — permanent OSM data
+  construction: '#F59E0B',  // amber-500 — live WIOR
   report: '#EC4899',        // pink-500  — community reports
+};
+
+// Categories shown beneath each layer's name in the legend.
+// Same colour as the layer dot — only the icon distinguishes the type.
+const LAYER_DETAILS = {
+  osm: [
+    { icon: '🪨', key: 'osm_cobblestone' },
+    { icon: '🪜', key: 'osm_steps' },
+    { icon: '⛔', key: 'osm_wheelchair_no' },
+    { icon: '↔️', key: 'osm_narrow' },
+    { icon: '🚧', key: 'osm_barriers' },
+    { icon: '⛰️', key: 'osm_steep' },
+  ],
+  construction: [
+    { icon: '🏗️', key: 'wior_active' },
+  ],
+  report: [
+    { icon: '🚲', key: 'cat_parked_bikes' },
+    { icon: '🕳️', key: 'cat_broken_pavement' },
+    { icon: '🏗️', key: 'cat_scaffolding' },
+    { icon: '🚗', key: 'cat_parked_car' },
+    { icon: '💧', key: 'cat_flood' },
+    { icon: '🗑️', key: 'cat_trash' },
+  ],
 };
 
 // ─── SVG fallback map (shown when token is absent) ──────────────────────────
@@ -96,27 +124,27 @@ function SvgMapFallback({ liveCoords }) {
   );
 }
 
-// ─── Mapbox route setup (mock-data demo path) ───────────────────────────────
+// ─── Mock-data fallback (no live route yet) ─────────────────────────────────
 function setupMockRouteAnimation(map, intervalRef) {
   routeSegments.features.forEach((feat, i) => {
-    map.addSource(`seg-${i}`, { type: 'geojson', data: feat });
+    map.addSource(`mock-seg-${i}`, { type: 'geojson', data: feat });
     map.addLayer({
-      id: `seg-${i}`,
+      id: `mock-seg-${i}`,
       type: 'line',
-      source: `seg-${i}`,
+      source: `mock-seg-${i}`,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: { 'line-color': feat.properties.color, 'line-width': 8, 'line-opacity': 0.95 },
     });
   });
 
-  map.addSource('route-draw', {
+  map.addSource('mock-draw', {
     type: 'geojson',
     data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [fullRouteCoordinates[0]] } },
   });
   map.addLayer({
-    id: 'route-draw',
+    id: 'mock-draw',
     type: 'line',
-    source: 'route-draw',
+    source: 'mock-draw',
     layout: { 'line-cap': 'round', 'line-join': 'round' },
     paint: { 'line-color': '#ffffff', 'line-width': 3, 'line-opacity': 0.7 },
   });
@@ -126,11 +154,11 @@ function setupMockRouteAnimation(map, intervalRef) {
     if (step >= fullRouteCoordinates.length) {
       clearInterval(intervalRef.current);
       setTimeout(() => {
-        if (map.getLayer('route-draw')) map.setPaintProperty('route-draw', 'line-opacity', 0);
+        if (map.getLayer('mock-draw')) map.setPaintProperty('mock-draw', 'line-opacity', 0);
       }, 600);
       return;
     }
-    map.getSource('route-draw').setData({
+    map.getSource('mock-draw').setData({
       type: 'Feature',
       geometry: { type: 'LineString', coordinates: fullRouteCoordinates.slice(0, step + 1) },
     });
@@ -146,48 +174,50 @@ function setupMockRouteAnimation(map, intervalRef) {
   new mapboxgl.Marker({ element: mkEl('#2ECC71') }).setLngLat(fullRouteCoordinates[fullRouteCoordinates.length - 1]).addTo(map);
 }
 
-// ─── Mapbox route setup (live data) ─────────────────────────────────────────
-function setupLiveRouteAnimation(map, intervalRef, route) {
-  const coords = route.geometry.coordinates;
-  const color = scoreToColor(route.accessibility_score);
+// ─── Live route(s): all 3 alternatives, selected one highlighted ────────────
+function setupLiveRoutes(map, routes, selectedIndex, setSelectedIndex) {
+  // Render unselected first so the selected one ends on top.
+  const order = routes.map((_, i) => i).filter((i) => i !== selectedIndex);
+  order.push(selectedIndex);
 
-  map.addSource('live-route', { type: 'geojson', data: route.geometry });
-  map.addLayer({
-    id: 'live-route',
-    type: 'line',
-    source: 'live-route',
-    layout: { 'line-cap': 'round', 'line-join': 'round' },
-    paint: { 'line-color': color, 'line-width': 8, 'line-opacity': 0.95 },
-  });
-
-  map.addSource('route-draw', {
-    type: 'geojson',
-    data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [coords[0]] } },
-  });
-  map.addLayer({
-    id: 'route-draw',
-    type: 'line',
-    source: 'route-draw',
-    layout: { 'line-cap': 'round', 'line-join': 'round' },
-    paint: { 'line-color': '#ffffff', 'line-width': 3, 'line-opacity': 0.7 },
-  });
-
-  let step = 1;
-  intervalRef.current = setInterval(() => {
-    if (step >= coords.length) {
-      clearInterval(intervalRef.current);
-      setTimeout(() => {
-        if (map.getLayer('route-draw')) map.setPaintProperty('route-draw', 'line-opacity', 0);
-      }, 600);
-      return;
-    }
-    map.getSource('route-draw').setData({
-      type: 'Feature',
-      geometry: { type: 'LineString', coordinates: coords.slice(0, step + 1) },
+  for (const i of order) {
+    const r = routes[i];
+    const isSel = i === selectedIndex;
+    map.addSource(`route-${i}`, { type: 'geojson', data: r.geometry });
+    map.addLayer({
+      id: `route-${i}-casing`,
+      type: 'line',
+      source: `route-${i}`,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#0F1F3D',
+        'line-width': isSel ? 11 : 6,
+        'line-opacity': isSel ? 0.45 : 0.25,
+      },
     });
-    step++;
-  }, 70);
+    map.addLayer({
+      id: `route-${i}`,
+      type: 'line',
+      source: `route-${i}`,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': ROUTE_COLORS[i] ?? '#9CA3AF',
+        'line-width': isSel ? 7 : 4,
+        'line-opacity': isSel ? 0.95 : 0.55,
+      },
+    });
 
+    // Click on a non-selected route to switch to it.
+    if (!isSel) {
+      map.on('click', `route-${i}`, () => setSelectedIndex(i));
+      map.on('mouseenter', `route-${i}`, () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', `route-${i}`, () => { map.getCanvas().style.cursor = ''; });
+    }
+  }
+
+  // Start/end markers from the selected route only.
+  const selected = routes[selectedIndex];
+  const coords = selected.geometry.coordinates;
   const mkEl = (bg) => {
     const el = document.createElement('div');
     el.style.cssText = `width:14px;height:14px;border-radius:50%;background:${bg};border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,.5)`;
@@ -196,12 +226,31 @@ function setupLiveRouteAnimation(map, intervalRef, route) {
   new mapboxgl.Marker({ element: mkEl('#0F1F3D') }).setLngLat(coords[0]).addTo(map);
   new mapboxgl.Marker({ element: mkEl('#2ECC71') }).setLngLat(coords[coords.length - 1]).addTo(map);
 
-  const lngs = coords.map((c) => c[0]);
-  const lats = coords.map((c) => c[1]);
+  // Fit bounds across ALL routes so all alternatives are visible.
+  const allLngs = routes.flatMap((r) => r.geometry.coordinates.map((c) => c[0]));
+  const allLats = routes.flatMap((r) => r.geometry.coordinates.map((c) => c[1]));
   map.fitBounds(
-    [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
-    { padding: { top: 80, bottom: 360, left: 40, right: 40 }, duration: 700 },
+    [[Math.min(...allLngs), Math.min(...allLats)], [Math.max(...allLngs), Math.max(...allLats)]],
+    { padding: { top: 80, bottom: 380, left: 40, right: 40 }, duration: 700 },
   );
+}
+
+function restyleSelectedRoute(map, routes, selectedIndex) {
+  for (let i = 0; i < routes.length; i++) {
+    const isSel = i === selectedIndex;
+    if (map.getLayer(`route-${i}`)) {
+      map.setPaintProperty(`route-${i}`, 'line-width', isSel ? 7 : 4);
+      map.setPaintProperty(`route-${i}`, 'line-opacity', isSel ? 0.95 : 0.55);
+    }
+    if (map.getLayer(`route-${i}-casing`)) {
+      map.setPaintProperty(`route-${i}-casing`, 'line-width', isSel ? 11 : 6);
+      map.setPaintProperty(`route-${i}-casing`, 'line-opacity', isSel ? 0.45 : 0.25);
+    }
+    if (isSel && map.getLayer(`route-${i}`)) {
+      map.moveLayer(`route-${i}-casing`);
+      map.moveLayer(`route-${i}`);
+    }
+  }
 }
 
 // ─── Convert API obstacle payload into Mapbox sources ───────────────────────
@@ -212,17 +261,13 @@ function obstaclesToFeatureCollections(payload) {
     construction: { type: 'FeatureCollection', features: [] },
     reports: { type: 'FeatureCollection', features: [] },
   };
-  // OSM permanent
   if (payload.osm) {
     for (const layer of Object.values(payload.osm)) {
       for (const el of layer.elements ?? []) {
         if (el.type === 'way' && Array.isArray(el.geometry) && el.geometry.length >= 2) {
           out.osmLines.features.push({
             type: 'Feature',
-            geometry: {
-              type: 'LineString',
-              coordinates: el.geometry.map((p) => [p.lon, p.lat]),
-            },
+            geometry: { type: 'LineString', coordinates: el.geometry.map((p) => [p.lon, p.lat]) },
             properties: el.tags ?? {},
           });
         } else if (el.type === 'node' && el.lat != null && el.lon != null) {
@@ -235,20 +280,13 @@ function obstaclesToFeatureCollections(payload) {
       }
     }
   }
-  // WIOR construction
   for (const c of payload.construction ?? []) {
     out.construction.features.push({
       type: 'Feature',
       geometry: c.geometry,
-      properties: {
-        project_name: c.project_name,
-        type: c.type,
-        start_date: c.start_date,
-        end_date: c.end_date,
-      },
+      properties: { project_name: c.project_name, type: c.type, start_date: c.start_date, end_date: c.end_date },
     });
   }
-  // Crowdsourced reports
   for (const r of payload.reports ?? []) {
     const meta = payload.categories?.[r.category];
     out.reports.features.push({
@@ -327,14 +365,7 @@ function addObstacleLayers(map, fcs) {
     type: 'circle',
     source: 'reports',
     paint: {
-      'circle-radius': [
-        'match',
-        ['get', 'severity'],
-        'high', 9,
-        'medium', 7,
-        'low', 5,
-        7,
-      ],
+      'circle-radius': ['match', ['get', 'severity'], 'high', 9, 'medium', 7, 'low', 5, 7],
       'circle-color': COLORS.report,
       'circle-stroke-color': 'white',
       'circle-stroke-width': 2,
@@ -352,14 +383,21 @@ export default function MapScreen({ onNavigate, routeData }) {
   const [, setMapReady] = useState(false);
   const [mapError, setMapError] = useState(!MAPBOX_TOKEN);
 
+  const [selectedIndex, setSelectedIndex] = useState(0);
   const [showObstacles, setShowObstacles] = useState(false);
   const [obstacles, setObstacles] = useState(null);
   const [obstaclesLoading, setObstaclesLoading] = useState(false);
 
-  const liveRoute = routeData?.routes?.[0] ?? null;
+  const routes = routeData?.routes ?? [];
+  const liveRoute = routes[selectedIndex] ?? null;
   const liveCoords = liveRoute?.geometry?.coordinates ?? null;
 
-  // Initialise the map once. Re-runs only when the route identity changes.
+  // Reset selected index when a new route set arrives.
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [routeData]);
+
+  // Initialise the map once per route-set identity.
   useEffect(() => {
     if (!MAPBOX_TOKEN) return;
 
@@ -384,17 +422,15 @@ export default function MapScreen({ onNavigate, routeData }) {
 
       map.on('load', () => {
         if (!mounted) return;
-        if (liveRoute) {
-          setupLiveRouteAnimation(map, intervalRef, liveRoute);
+        if (routes.length > 0) {
+          setupLiveRoutes(map, routes, selectedIndex, setSelectedIndex);
         } else {
           setupMockRouteAnimation(map, intervalRef);
         }
         setMapReady(true);
       });
 
-      map.on('error', () => {
-        if (mounted) setMapError(true);
-      });
+      map.on('error', () => { if (mounted) setMapError(true); });
     } catch {
       setMapError(true);
     }
@@ -405,9 +441,18 @@ export default function MapScreen({ onNavigate, routeData }) {
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveRoute]);
+  }, [routeData]);
 
-  // Fetch obstacles the first time the toggle is enabled.
+  // Re-style when selection changes (without re-creating the map).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || routes.length === 0) return;
+    const apply = () => restyleSelectedRoute(map, routes, selectedIndex);
+    if (map.isStyleLoaded()) apply();
+    else map.once('idle', apply);
+  }, [selectedIndex, routes]);
+
+  // Fetch obstacles once on first toggle-on.
   useEffect(() => {
     if (!showObstacles || obstacles || obstaclesLoading) return;
     setObstaclesLoading(true);
@@ -417,24 +462,21 @@ export default function MapScreen({ onNavigate, routeData }) {
       .finally(() => setObstaclesLoading(false));
   }, [showObstacles, obstacles, obstaclesLoading]);
 
-  // Add / remove the obstacle layers on the map when toggle or data changes.
+  // Apply obstacle layers when toggle / data changes.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-
     const apply = () => {
       clearObstacleLayers(map);
       if (showObstacles && obstacles) {
         addObstacleLayers(map, obstaclesToFeatureCollections(obstacles));
       }
     };
-
     if (map.isStyleLoaded()) apply();
     else map.once('idle', apply);
   }, [showObstacles, obstacles]);
 
   const showFallback = mapError || !MAPBOX_TOKEN;
-
   const fromLabel = routeData?.from?.display_name?.split(',')[0] ?? t('routeFrom');
   const toLabel = routeData?.to?.display_name?.split(',')[0] ?? t('routeTo');
 
@@ -463,38 +505,11 @@ export default function MapScreen({ onNavigate, routeData }) {
           </svg>
         </motion.button>
 
-        <motion.div
-          initial={{ opacity: 0, x: 12 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.25 }}
-          className="pointer-events-auto flex flex-col items-stretch gap-1.5 bg-black/40 backdrop-blur-md rounded-2xl px-3 py-2.5 shadow-card border border-white/10"
-        >
-          <div className="flex items-center gap-1.5">
-            <div className="relative w-2 h-2 flex-shrink-0">
-              <div className="absolute inset-0 rounded-full bg-accessible animate-ping opacity-75" />
-              <div className="w-2 h-2 rounded-full bg-accessible relative" />
-            </div>
-            <span className="font-body text-xs text-white/85 font-semibold tracking-wide">Live</span>
-          </div>
-          <div className="w-full h-px bg-white/15" aria-hidden="true" />
-          <LegendRow color="bg-accessible" label={t('legendAccessible')} />
-          <LegendRow color="bg-moderate"   label={t('legendModerate')}   />
-          <LegendRow color="bg-difficult"  label={t('legendDifficult')}  />
-          {showObstacles && (
-            <>
-              <div className="w-full h-px bg-white/15 my-0.5" aria-hidden="true" />
-              <LegendDot color={COLORS.osm}          label={t('layerOsm')}          />
-              <LegendDot color={COLORS.construction} label={t('layerConstruction')} />
-              <LegendDot color={COLORS.report}       label={t('layerReports')}      />
-            </>
-          )}
-          <div className="w-full h-px bg-white/15 my-0.5" aria-hidden="true" />
-          <LanguageToggle variant="map" />
-        </motion.div>
+        <Legend t={t} showObstacles={showObstacles} />
       </div>
 
-      {/* Right-side floating action stack: obstructions toggle + report */}
-      <div className="absolute right-4 bottom-[340px] z-20 flex flex-col items-center gap-3">
+      {/* Right-side floating action stack */}
+      <div className="absolute right-4 bottom-[420px] z-20 flex flex-col items-center gap-3">
         <motion.button
           initial={{ opacity: 0, scale: 0.7 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -504,9 +519,7 @@ export default function MapScreen({ onNavigate, routeData }) {
           aria-pressed={showObstacles}
           aria-label={t('toggleObstructions')}
           className={`w-14 h-14 rounded-full flex items-center justify-center border shadow-[0_4px_20px_rgba(0,0,0,0.55)] transition-colors ${
-            showObstacles
-              ? 'bg-white text-navy border-white'
-              : 'bg-navy text-white border-white/20'
+            showObstacles ? 'bg-white text-navy border-white' : 'bg-navy text-white border-white/20'
           }`}
         >
           {obstaclesLoading ? <SpinnerIcon /> : <LayersIcon />}
@@ -533,7 +546,7 @@ export default function MapScreen({ onNavigate, routeData }) {
         <span className="font-body text-xs text-white/65 font-medium -mt-1.5">Report</span>
       </div>
 
-      {/* Route card — slides up from bottom */}
+      {/* Bottom sheet */}
       <motion.div
         initial={{ y: '100%', opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
@@ -543,6 +556,54 @@ export default function MapScreen({ onNavigate, routeData }) {
         <div className="bg-cream rounded-t-3xl px-5 pt-4 pb-8 shadow-[0_-8px_40px_rgba(0,0,0,0.4)]">
           <div className="w-10 h-1 bg-navy/15 rounded-full mx-auto mb-4" aria-hidden="true" />
 
+          {/* Route alternatives selector */}
+          {routes.length > 1 && (
+            <div className="flex gap-2 mb-3">
+              {routes.map((r, i) => {
+                const isSel = i === selectedIndex;
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setSelectedIndex(i)}
+                    className={`
+                      flex-1 rounded-2xl px-3 py-2.5 text-left transition-all
+                      border-2
+                      ${isSel ? 'bg-white shadow-card' : 'bg-navy/3 hover:bg-navy/6'}
+                    `}
+                    style={{
+                      borderColor: isSel ? ROUTE_COLORS[i] : 'transparent',
+                    }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                        style={{ background: ROUTE_COLORS[i] }}
+                        aria-hidden="true"
+                      />
+                      <span className="font-display font-bold text-navy text-sm leading-none">
+                        {i === 0 ? t('routeBest') : `${t('routeAlt')} ${i}`}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex items-baseline gap-1.5">
+                      <span className={`font-display font-bold text-lg leading-none ${
+                        r.accessibility_score >= 80 ? 'text-accessible'
+                        : r.accessibility_score >= 60 ? 'text-moderate'
+                        : 'text-difficult'
+                      }`}>
+                        {r.accessibility_score}
+                      </span>
+                      <span className="font-body text-[11px] text-navy/50">
+                        · {Math.round(r.distance_m)} m
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* From → To */}
           <div className="flex items-center gap-2 mb-4 overflow-hidden">
             <span className="font-body text-sm text-navy/50 font-medium truncate flex-shrink-0">
               {fromLabel}
@@ -562,24 +623,92 @@ export default function MapScreen({ onNavigate, routeData }) {
   );
 }
 
-function LegendRow({ color, label }) {
+function Legend({ t, showObstacles }) {
   return (
-    <div className="flex items-center gap-2.5 w-full">
-      <div className={`w-3 h-3 rounded-full ${color} flex-shrink-0`} aria-hidden="true" />
-      <span className="font-body text-xs text-white/85 font-medium">{label}</span>
-    </div>
+    <motion.div
+      initial={{ opacity: 0, x: 12 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ delay: 0.25 }}
+      className="pointer-events-auto flex flex-col items-stretch gap-1.5 bg-black/40 backdrop-blur-md rounded-2xl px-3 py-2.5 shadow-card border border-white/10 max-w-[210px]"
+    >
+      <div className="flex items-center gap-1.5">
+        <div className="relative w-2 h-2 flex-shrink-0">
+          <div className="absolute inset-0 rounded-full bg-accessible animate-ping opacity-75" />
+          <div className="w-2 h-2 rounded-full bg-accessible relative" />
+        </div>
+        <span className="font-body text-xs text-white/85 font-semibold tracking-wide">Live</span>
+      </div>
+      <div className="w-full h-px bg-white/15" aria-hidden="true" />
+      <LegendDot color="#2ECC71" label={t('legendAccessible')} />
+      <LegendDot color="#F39C12" label={t('legendModerate')}   />
+      <LegendDot color="#E74C3C" label={t('legendDifficult')}  />
+
+      <AnimatePresence initial={false}>
+        {showObstacles && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
+            className="overflow-hidden"
+          >
+            <div className="w-full h-px bg-white/15 my-1" aria-hidden="true" />
+            <LayerSection
+              color={COLORS.osm}
+              label={t('layerOsm')}
+              items={LAYER_DETAILS.osm}
+              t={t}
+            />
+            <LayerSection
+              color={COLORS.construction}
+              label={t('layerConstruction')}
+              items={LAYER_DETAILS.construction}
+              t={t}
+            />
+            <LayerSection
+              color={COLORS.report}
+              label={t('layerReports')}
+              items={LAYER_DETAILS.report}
+              t={t}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="w-full h-px bg-white/15 my-0.5" aria-hidden="true" />
+      <LanguageToggle variant="map" />
+    </motion.div>
   );
 }
 
 function LegendDot({ color, label }) {
   return (
     <div className="flex items-center gap-2.5 w-full">
-      <div
-        className="w-3 h-3 rounded-full flex-shrink-0"
-        style={{ background: color }}
-        aria-hidden="true"
-      />
+      <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: color }} aria-hidden="true" />
       <span className="font-body text-xs text-white/85 font-medium">{label}</span>
+    </div>
+  );
+}
+
+function LayerSection({ color, label, items, t }) {
+  return (
+    <div className="mt-1.5">
+      <div className="flex items-center gap-2 mb-1">
+        <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: color }} aria-hidden="true" />
+        <span className="font-body text-xs text-white/85 font-semibold">{label}</span>
+      </div>
+      <div className="flex flex-wrap gap-1 pl-5">
+        {items.map((it) => (
+          <span
+            key={it.key}
+            title={t(it.key) || it.key}
+            className="text-sm leading-none select-none"
+            aria-label={t(it.key) || it.key}
+          >
+            {it.icon}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
