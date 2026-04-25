@@ -1,39 +1,34 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../context/LanguageContext';
+import { classifyPhoto, saveReport, fileToBase64, getLocation, ApiError } from '../lib/api';
 
 const DEMO_PHOTO = (
   <svg viewBox="0 0 300 220" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
     <rect width="300" height="220" fill="#7A8A94"/>
     <rect y="130" width="300" height="90" fill="#9A9080"/>
     <rect y="124" width="300" height="12" fill="#B8AE98"/>
-    {/* Pavement grid lines */}
     <line x1="0" y1="155" x2="300" y2="155" stroke="#8A8070" strokeWidth="1" opacity="0.6"/>
     <line x1="0" y1="180" x2="300" y2="180" stroke="#8A8070" strokeWidth="1" opacity="0.6"/>
     <line x1="80" y1="130" x2="80" y2="220" stroke="#8A8070" strokeWidth="1" opacity="0.5"/>
     <line x1="160" y1="130" x2="160" y2="220" stroke="#8A8070" strokeWidth="1" opacity="0.5"/>
     <line x1="240" y1="130" x2="240" y2="220" stroke="#8A8070" strokeWidth="1" opacity="0.5"/>
-    {/* Orange traffic cone */}
     <polygon points="148,68 133,124 163,124" fill="#FF6B4A"/>
     <rect x="130" y="124" width="40" height="7" rx="2" fill="#D95A32"/>
     <line x1="137" y1="86" x2="159" y2="86" stroke="white" strokeWidth="3" opacity="0.9"/>
     <line x1="134" y1="100" x2="162" y2="100" stroke="white" strokeWidth="3" opacity="0.9"/>
     <line x1="131" y1="114" x2="165" y2="114" stroke="white" strokeWidth="3" opacity="0.9"/>
-    {/* Blocked kerb area */}
     <rect x="60" y="124" width="80" height="6" rx="1" fill="#C8392B" opacity="0.8"/>
     <rect x="60" y="127" width="80" height="3" fill="#E74C3C" opacity="0.6"/>
-    {/* Buildings background */}
     <rect x="0" y="20" width="80" height="110" fill="#6A7880"/>
     <rect x="90" y="40" width="60" height="90" fill="#728090"/>
     <rect x="200" y="10" width="100" height="120" fill="#687078"/>
-    {/* Windows */}
     <rect x="10" y="35" width="16" height="12" rx="1" fill="#9ABACC" opacity="0.7"/>
     <rect x="32" y="35" width="16" height="12" rx="1" fill="#9ABACC" opacity="0.7"/>
     <rect x="10" y="55" width="16" height="12" rx="1" fill="#9ABACC" opacity="0.5"/>
     <rect x="32" y="55" width="16" height="12" rx="1" fill="#9ABACC" opacity="0.7"/>
-    {/* Dark overlay at bottom */}
     <rect y="190" width="300" height="30" fill="rgba(0,0,0,0.45)"/>
-    <text x="10" y="210" fontFamily="sans-serif" fontSize="10" fill="white" opacity="0.85">Waterlooplein — kerb cut blocked by temporary signage</text>
+    <text x="10" y="210" fontFamily="sans-serif" fontSize="10" fill="white" opacity="0.85">Demo image — Claude classifies a real photo from the API</text>
   </svg>
 );
 
@@ -42,18 +37,49 @@ export default function ReportScreen({ onNavigate }) {
   const [step, setStep] = useState('camera');
   const [usedDemo, setUsedDemo] = useState(false);
   const [photoFile, setPhotoFile] = useState(null);
+  const [classification, setClassification] = useState(null);
+  const [location, setLocation] = useState(null);
+  const [error, setError] = useState(null);
+  const [saving, setSaving] = useState(false);
   const fileRef = useRef(null);
 
-  const startAnalysis = () => {
+  // Try to grab location early, in the background, so it's ready by confirm time.
+  useEffect(() => {
+    getLocation().then(setLocation);
+  }, []);
+
+  const startAnalysis = async ({ demo = false, file = null } = {}) => {
     setStep('analyzing');
-    setTimeout(() => setStep('result'), 2400);
+    setError(null);
+    setClassification(null);
+    try {
+      let result;
+      if (demo) {
+        result = await classifyPhoto({ demo: true });
+      } else {
+        const { base64, mediaType } = await fileToBase64(file);
+        result = await classifyPhoto({ base64, mediaType });
+      }
+      setClassification(result);
+      setStep('result');
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Unknown error',
+      );
+      setStep('error');
+    }
   };
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setPhotoFile(URL.createObjectURL(file));
-    startAnalysis();
+    setUsedDemo(false);
+    startAnalysis({ file });
   };
 
   const handleTakePhoto = () => {
@@ -62,10 +88,27 @@ export default function ReportScreen({ onNavigate }) {
 
   const handleDemo = () => {
     setUsedDemo(true);
-    startAnalysis();
+    setPhotoFile(null);
+    startAnalysis({ demo: true });
   };
 
-  const handleConfirm = () => setStep('success');
+  const handleConfirm = async () => {
+    if (!classification) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const loc = location ?? (await getLocation());
+      await saveReport({
+        classification,
+        lat: loc.lat,
+        lng: loc.lng,
+      });
+      setStep('success');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not save report.');
+      setSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (step === 'success') {
@@ -98,13 +141,26 @@ export default function ReportScreen({ onNavigate }) {
         {step === 'analyzing' && (
           <AnalyzingStep key="analyzing" photoFile={photoFile} usedDemo={usedDemo} t={t} />
         )}
-        {step === 'result' && (
+        {step === 'result' && classification && (
           <ResultStep
             key="result"
             photoFile={photoFile}
             usedDemo={usedDemo}
+            classification={classification}
+            location={location}
+            saving={saving}
+            error={error}
             onConfirm={handleConfirm}
             onCancel={() => onNavigate('map')}
+            t={t}
+          />
+        )}
+        {step === 'error' && (
+          <ErrorStep
+            key="error"
+            error={error}
+            onRetry={() => setStep('camera')}
+            onBack={() => onNavigate('map')}
             t={t}
           />
         )}
@@ -125,7 +181,6 @@ function CameraStep({ onTakePhoto, onDemo, onBack, t }) {
       transition={{ duration: 0.25 }}
       className="flex flex-col h-full"
     >
-      {/* Header */}
       <div className="flex items-center px-4 pt-14 pb-3 flex-shrink-0">
         <button
           onClick={onBack}
@@ -139,23 +194,17 @@ function CameraStep({ onTakePhoto, onDemo, onBack, t }) {
         <h1 className="font-display font-bold text-cream text-lg ml-4">{t('reportTitle')}</h1>
       </div>
 
-      {/* Viewfinder */}
       <div className="flex-1 flex items-center justify-center px-6">
         <div className="relative w-full" style={{ aspectRatio: '4/3' }}>
-          {/* Dimmed surround */}
           <div className="absolute inset-0 rounded-2xl" style={{ background: 'rgba(0,0,0,0.25)' }} />
-          {/* Frame border */}
           <div className="absolute inset-0 rounded-2xl border border-white/20" />
-          {/* Corner brackets */}
           <div className="absolute top-3 left-3 w-7 h-7 border-t-2 border-l-2 border-cream rounded-tl-lg" />
           <div className="absolute top-3 right-3 w-7 h-7 border-t-2 border-r-2 border-cream rounded-tr-lg" />
           <div className="absolute bottom-3 left-3 w-7 h-7 border-b-2 border-l-2 border-cream rounded-bl-lg" />
           <div className="absolute bottom-3 right-3 w-7 h-7 border-b-2 border-r-2 border-cream rounded-br-lg" />
-          {/* Centre hint */}
           <div className="absolute inset-0 flex items-center justify-center">
             <p className="font-body text-cream/40 text-sm text-center px-8">{t('reportPrompt')}</p>
           </div>
-          {/* Scan line animation */}
           <motion.div
             className="absolute left-3 right-3 h-[1.5px] rounded-full"
             style={{ background: 'linear-gradient(90deg, transparent, #2ECC71, transparent)' }}
@@ -165,7 +214,6 @@ function CameraStep({ onTakePhoto, onDemo, onBack, t }) {
         </div>
       </div>
 
-      {/* Bottom controls */}
       <div className="flex-shrink-0 pb-12 flex flex-col items-center gap-4">
         <motion.button
           whileTap={{ scale: 0.9 }}
@@ -202,7 +250,6 @@ function AnalyzingStep({ photoFile, usedDemo, t }) {
       transition={{ duration: 0.3 }}
       className="flex flex-col h-full items-center justify-center px-8 gap-8"
     >
-      {/* Photo preview (blurred) */}
       <div className="w-48 h-36 rounded-2xl overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.6)] relative">
         <div className="w-full h-full blur-sm scale-105">
           {photoFile ? (
@@ -218,26 +265,53 @@ function AnalyzingStep({ photoFile, usedDemo, t }) {
         </div>
       </div>
 
-      {/* Text */}
       <div className="text-center">
         <p className="font-display font-bold text-cream text-xl mb-2">{t('reportAnalyzing')}</p>
         <ProgressDots />
+        <p className="font-body text-cream/45 text-xs mt-3">{t('reportAnalyzingHint')}</p>
       </div>
 
-      {/* Animated progress bar */}
       <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
         <motion.div
           className="h-full bg-accessible rounded-full"
           initial={{ width: '0%' }}
-          animate={{ width: '100%' }}
-          transition={{ duration: 2.2, ease: 'easeInOut' }}
+          animate={{ width: '90%' }}
+          transition={{ duration: 6, ease: 'easeOut' }}
         />
       </div>
     </motion.div>
   );
 }
 
-function ResultStep({ photoFile, usedDemo, onConfirm, onCancel, t }) {
+const SEVERITY_BADGE = {
+  high: { color: '#E74C3C', bgClass: 'bg-difficult/20', textClass: 'text-difficult' },
+  medium: { color: '#F39C12', bgClass: 'bg-moderate/20', textClass: 'text-moderate' },
+  low: { color: '#2ECC71', bgClass: 'bg-accessible/20', textClass: 'text-accessible' },
+};
+
+const CATEGORY_EMOJI = {
+  broken_pavement: '🕳️',
+  scaffolding: '🏗️',
+  temp_fence: '🚧',
+  missing_kerb_ramp: '⛔',
+  narrow_passage: '↔️',
+  parked_car: '🚗',
+  parked_bikes: '🚲',
+  flood: '💧',
+  trash: '🗑️',
+  street_furniture: '🪑',
+  misc: '❓',
+};
+
+function prettyCategory(c) {
+  return c.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+}
+
+function ResultStep({ photoFile, usedDemo, classification, location, saving, error, onConfirm, onCancel, t }) {
+  const sev = SEVERITY_BADGE[classification.severity] ?? SEVERITY_BADGE.medium;
+  const emoji = CATEGORY_EMOJI[classification.category] ?? '❓';
+  const confidencePct = Math.round(classification.confidence * 100);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 24 }}
@@ -248,7 +322,6 @@ function ResultStep({ photoFile, usedDemo, onConfirm, onCancel, t }) {
     >
       <h1 className="font-display font-bold text-cream text-xl mb-5">{t('reportVerdictLabel')}</h1>
 
-      {/* Photo thumbnail */}
       <div className="w-full rounded-2xl overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.5)] mb-5" style={{ aspectRatio: '16/9' }}>
         {photoFile ? (
           <img src={photoFile} className="w-full h-full object-cover" alt="Captured obstruction" />
@@ -257,61 +330,108 @@ function ResultStep({ photoFile, usedDemo, onConfirm, onCancel, t }) {
         )}
       </div>
 
-      {/* Verdict card */}
-      <div className="bg-white/8 rounded-2xl p-4 border border-white/12 mb-4">
+      <div className="bg-white/8 rounded-2xl p-4 border border-white/12 mb-3">
         <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-[#FF6B4A]/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-            <svg viewBox="0 0 20 20" fill="none" className="w-5 h-5" aria-hidden="true">
-              <path d="M10 3L18 17H2L10 3Z" fill="#FF6B4A"/>
-              <path d="M10 8v4" stroke="white" strokeWidth="1.8" strokeLinecap="round"/>
-              <circle cx="10" cy="14" r="0.9" fill="white"/>
-            </svg>
+          <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center flex-shrink-0 mt-0.5 text-xl">
+            {emoji}
           </div>
           <div className="flex-1 min-w-0">
             <p className="font-display font-bold text-cream text-base leading-tight mb-1">
-              {t('reportVerdictTitle')}
+              {prettyCategory(classification.category)}
             </p>
-            <span className="inline-block bg-accessible/20 text-accessible font-body text-xs font-bold px-2.5 py-1 rounded-full">
-              {t('reportConfidenceLabel')}
-            </span>
+            <p className="font-body text-cream/70 text-sm leading-snug">
+              {classification.description}
+            </p>
           </div>
         </div>
 
         <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-          {[
-            { label: 'Type', value: 'Kerb cut' },
-            { label: 'Severity', value: 'High' },
-            { label: 'Location', value: 'Verified' },
-          ].map(({ label, value }) => (
-            <div key={label} className="bg-white/6 rounded-xl py-2">
-              <p className="font-body text-cream/45 text-[10px] uppercase tracking-wide">{label}</p>
-              <p className="font-body text-cream text-xs font-semibold mt-0.5">{value}</p>
-            </div>
-          ))}
+          <Stat label={t('reportStatSeverity')} value={
+            <span className={`${sev.textClass} font-semibold`}>
+              {t(`severity_${classification.severity}`)}
+            </span>
+          } />
+          <Stat label={t('reportStatConfidence')} value={`${confidencePct}%`} />
+          <Stat label={t('reportStatLocation')} value={
+            location?.source === 'gps' ? t('reportLocationGps') : t('reportLocationApprox')
+          } />
         </div>
       </div>
 
+      {error && (
+        <div className="mb-3 px-4 py-2.5 rounded-xl bg-difficult/15 border border-difficult/40 font-body text-xs text-difficult">
+          {error}
+        </div>
+      )}
+
       <div className="flex-1" />
 
-      {/* Actions */}
       <div className="flex gap-3">
         <motion.button
           whileTap={{ scale: 0.96 }}
           onClick={onCancel}
-          className="flex-1 h-14 rounded-2xl border-2 border-white/20 text-cream font-body font-semibold text-base flex items-center justify-center"
+          disabled={saving}
+          className="flex-1 h-14 rounded-2xl border-2 border-white/20 text-cream font-body font-semibold text-base flex items-center justify-center disabled:opacity-50"
         >
           {t('reportCancel')}
         </motion.button>
         <motion.button
           whileTap={{ scale: 0.96 }}
           onClick={onConfirm}
-          className="flex-[2] h-14 rounded-2xl bg-navy text-cream font-display font-bold text-base flex items-center justify-center gap-2 shadow-card border border-white/10"
+          disabled={saving}
+          className="flex-[2] h-14 rounded-2xl bg-navy text-cream font-display font-bold text-base flex items-center justify-center gap-2 shadow-card border border-white/10 disabled:opacity-70"
         >
-          <svg viewBox="0 0 20 20" fill="none" className="w-4 h-4" aria-hidden="true">
-            <path d="M4 10l4 4 8-8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-          {t('reportConfirm')}
+          {saving ? (
+            <SpinnerIcon />
+          ) : (
+            <svg viewBox="0 0 20 20" fill="none" className="w-4 h-4" aria-hidden="true">
+              <path d="M4 10l4 4 8-8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          )}
+          {saving ? t('reportSaving') : t('reportConfirm')}
         </motion.button>
+      </div>
+    </motion.div>
+  );
+}
+
+function ErrorStep({ error, onRetry, onBack, t }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.25 }}
+      className="flex flex-col h-full items-center justify-center px-8 gap-6 text-center"
+    >
+      <div className="w-16 h-16 rounded-full bg-difficult/20 border-2 border-difficult flex items-center justify-center">
+        <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8 text-difficult" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+          <path d="M12 7v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <circle cx="12" cy="16.5" r="1" fill="currentColor" />
+        </svg>
+      </div>
+      <div>
+        <p className="font-display font-bold text-cream text-xl mb-2">
+          {t('reportErrorTitle')}
+        </p>
+        <p className="font-body text-cream/65 text-sm leading-relaxed max-w-xs">
+          {error || t('reportErrorGeneric')}
+        </p>
+      </div>
+      <div className="flex gap-3 w-full max-w-xs">
+        <button
+          onClick={onBack}
+          className="flex-1 h-12 rounded-xl border-2 border-white/20 text-cream font-body font-semibold text-sm"
+        >
+          {t('reportCancel')}
+        </button>
+        <button
+          onClick={onRetry}
+          className="flex-1 h-12 rounded-xl bg-navy text-cream font-body font-semibold text-sm border border-white/15"
+        >
+          {t('reportRetry')}
+        </button>
       </div>
     </motion.div>
   );
@@ -326,7 +446,6 @@ function SuccessStep({ t }) {
       transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
       className="flex flex-col h-full items-center justify-center px-8 gap-6"
     >
-      {/* Animated checkmark circle */}
       <motion.div
         initial={{ scale: 0 }}
         animate={{ scale: 1 }}
@@ -347,7 +466,6 @@ function SuccessStep({ t }) {
         </svg>
       </motion.div>
 
-      {/* Ripple rings */}
       {[0, 1].map((i) => (
         <motion.div
           key={i}
@@ -370,9 +488,18 @@ function SuccessStep({ t }) {
         className="flex items-center gap-2 bg-white/6 rounded-full px-4 py-2 border border-white/10"
       >
         <div className="w-1.5 h-1.5 rounded-full bg-accessible" />
-        <span className="font-body text-cream/50 text-xs">Returning to map…</span>
+        <span className="font-body text-cream/50 text-xs">{t('reportSuccessReturning')}</span>
       </motion.div>
     </motion.div>
+  );
+}
+
+function Stat({ label, value }) {
+  return (
+    <div className="bg-white/6 rounded-xl py-2 px-1">
+      <p className="font-body text-cream/45 text-[10px] uppercase tracking-wide truncate">{label}</p>
+      <p className="font-body text-cream text-xs font-semibold mt-0.5 truncate">{value}</p>
+    </div>
   );
 }
 
@@ -388,5 +515,13 @@ function ProgressDots() {
         />
       ))}
     </div>
+  );
+}
+
+function SpinnerIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="w-5 h-5 animate-spin" aria-hidden="true">
+      <circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeDasharray="12 36" opacity="0.85" />
+    </svg>
   );
 }

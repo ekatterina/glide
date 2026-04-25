@@ -77,6 +77,97 @@ export async function searchRoute(fromText, toText) {
   return { from, to, ...route };
 }
 
+/**
+ * Send a photo to the backend for Claude-powered classification.
+ * Either pass a base64 string (with optional data: prefix) or set demo: true.
+ */
+export async function classifyPhoto({ base64, mediaType, demo = false }) {
+  const body = demo
+    ? { action: 'classify', use_demo: true }
+    : {
+        action: 'classify',
+        photo_base64: base64,
+        media_type: mediaType,
+      };
+  const res = await fetch('/api/reports', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json();
+  if (!res.ok || !json.classification) {
+    throw new ApiError(json.message || json.error || 'Classification failed', res.status, json);
+  }
+  return json.classification;
+}
+
+/**
+ * Persist a report to the local reports.json after the user confirms.
+ */
+export async function saveReport({ classification, lat, lng, note }) {
+  const res = await fetch('/api/reports', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'save', classification, lat, lng, note }),
+  });
+  const json = await res.json();
+  if (!res.ok || !json.report) {
+    throw new ApiError(json.message || json.error || 'Save failed', res.status, json);
+  }
+  return json.report;
+}
+
+/**
+ * Resize a File from <input type="file"> to a max dimension and JPEG-encode.
+ * Returns { base64, mediaType } ready to ship over JSON.
+ */
+export async function fileToBase64(file, maxDimension = 1280, quality = 0.85) {
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = () => reject(new Error('Could not decode image'));
+    i.src = dataUrl;
+  });
+
+  let { width, height } = img;
+  const scale = Math.min(1, maxDimension / Math.max(width, height));
+  width = Math.round(width * scale);
+  height = Math.round(height * scale);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, width, height);
+
+  const jpegDataUrl = canvas.toDataURL('image/jpeg', quality);
+  const base64 = jpegDataUrl.replace(/^data:image\/jpeg;base64,/, '');
+  return { base64, mediaType: 'image/jpeg' };
+}
+
+/**
+ * Wrap browser geolocation in a promise. Falls back to a sensible Amsterdam
+ * coordinate (Dam Square area) if the user denies or the API isn't available.
+ */
+export async function getLocation({ timeoutMs = 8000 } = {}) {
+  const fallback = { lat: 52.3702, lng: 4.8952 };
+  if (!navigator.geolocation) return { ...fallback, source: 'fallback' };
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, source: 'gps' }),
+      () => resolve({ ...fallback, source: 'fallback' }),
+      { timeout: timeoutMs, maximumAge: 60_000 },
+    );
+  });
+}
+
 // ---------- formatting helpers used by UI ----------
 export function formatDistance(meters) {
   if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
