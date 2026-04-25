@@ -15,11 +15,6 @@ function speak(text, lang) {
   }
 }
 
-/**
- * Build a one-paragraph summary of the live route — feeds the "Why this route?"
- * panel and the speech-synthesis "Hear route" button. Falls back to the
- * pre-translated copy when there's no live route yet (initial demo state).
- */
 function buildLiveSummary(liveRoute, t) {
   if (!liveRoute) return null;
 
@@ -44,12 +39,11 @@ function buildLiveSummary(liveRoute, t) {
   return summary;
 }
 
-export default function RouteCard({ onViewSteps, liveRoute }) {
+export default function RouteCard({ liveRoute }) {
   const { t } = useLanguage();
   const [whyOpen, setWhyOpen] = useState(false);
   const [speaking, setSpeaking] = useState(false);
 
-  // Live or fallback values for the three stat tiles.
   const stats = liveRoute
     ? {
         score: liveRoute.accessibility_score,
@@ -117,34 +111,23 @@ export default function RouteCard({ onViewSteps, liveRoute }) {
         </div>
       </div>
 
-      {/* Action buttons */}
-      <div className="flex gap-2.5 mb-3">
-        <motion.button
-          whileTap={{ scale: 0.96 }}
-          onClick={handleSpeak}
-          className={`
-            flex-1 h-12 rounded-xl flex items-center justify-center gap-2
-            font-body font-semibold text-sm border-2 transition-all duration-200
-            ${speaking
-              ? 'bg-navy text-cream border-navy'
-              : 'bg-transparent text-navy border-navy/20 hover:border-navy/50'
-            }
-          `}
-          aria-label={t('hearRoute')}
-        >
-          <MicIcon speaking={speaking} />
-          {t('hearRoute')}
-        </motion.button>
-
-        <motion.button
-          whileTap={{ scale: 0.96 }}
-          onClick={onViewSteps}
-          className="flex-1 h-12 rounded-xl bg-navy text-cream font-body font-semibold text-sm flex items-center justify-center gap-2 shadow-card"
-        >
-          <ListIcon />
-          {t('viewSteps')}
-        </motion.button>
-      </div>
+      {/* Hear-route button (full width, was sharing space with View Steps) */}
+      <motion.button
+        whileTap={{ scale: 0.96 }}
+        onClick={handleSpeak}
+        className={`
+          w-full h-12 rounded-xl flex items-center justify-center gap-2 mb-3
+          font-body font-semibold text-sm border-2 transition-all duration-200
+          ${speaking
+            ? 'bg-navy text-cream border-navy'
+            : 'bg-transparent text-navy border-navy/20 hover:border-navy/50'
+          }
+        `}
+        aria-label={t('hearRoute')}
+      >
+        <MicIcon speaking={speaking} />
+        {t('hearRoute')}
+      </motion.button>
 
       {/* Why this route — expandable */}
       <button
@@ -203,14 +186,6 @@ function MicIcon({ speaking }) {
       />
       <path d="M4 10a6 6 0 0012 0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
       <path d="M10 16v2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function ListIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" className="w-4 h-4" aria-hidden="true">
-      <path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   );
 }

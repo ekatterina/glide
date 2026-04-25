@@ -1,15 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import mapboxgl from 'mapbox-gl';
-import DirectionsScreen from './DirectionsScreen';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import RouteCard from '../components/RouteCard';
 import LanguageToggle from '../components/LanguageToggle';
 import { useLanguage } from '../context/LanguageContext';
 import { routeSegments, fullRouteCoordinates } from '../data/mockRoute';
-import { scoreToColor } from '../lib/api';
+import { scoreToColor, getObstacles } from '../lib/api';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
+
+// ─── Obstruction layer colours ──────────────────────────────────────────────
+// Three distinct hues so the layers read at a glance on the navy-night map.
+const COLORS = {
+  osm: '#94A3B8',           // slate-400 — permanent OSM data ("kadaster-like")
+  construction: '#F59E0B',  // amber-500 — live construction (WIOR)
+  report: '#EC4899',        // pink-500  — community reports
+};
 
 // ─── SVG fallback map (shown when token is absent) ──────────────────────────
 const BOUNDS = { lngMin: 4.886, lngMax: 4.924, latMin: 52.360, latMax: 52.380 };
@@ -82,16 +89,14 @@ function SvgMapFallback({ liveCoords }) {
         <circle cx={ex} cy={ey} r="10" fill="#2ECC71" />
         <circle cx={ex} cy={ey} r="5"  fill="white" />
       </svg>
-      {!liveCoords && (
-        <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-navy/80 backdrop-blur-sm text-cream text-xs font-body font-medium px-3 py-1.5 rounded-full pointer-events-none whitespace-nowrap">
-          {t('demoNotice')}
-        </div>
-      )}
+      <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-navy/80 backdrop-blur-sm text-cream text-xs font-body font-medium px-3 py-1.5 rounded-full pointer-events-none whitespace-nowrap text-center">
+        {liveCoords ? 'Set VITE_MAPBOX_TOKEN for interactive map' : t('demoNotice')}
+      </div>
     </div>
   );
 }
 
-// ─── Mapbox route setup (mock-data demo path, kept for offline preview) ─────
+// ─── Mapbox route setup (mock-data demo path) ───────────────────────────────
 function setupMockRouteAnimation(map, intervalRef) {
   routeSegments.features.forEach((feat, i) => {
     map.addSource(`seg-${i}`, { type: 'geojson', data: feat });
@@ -141,7 +146,7 @@ function setupMockRouteAnimation(map, intervalRef) {
   new mapboxgl.Marker({ element: mkEl('#2ECC71') }).setLngLat(fullRouteCoordinates[fullRouteCoordinates.length - 1]).addTo(map);
 }
 
-// ─── Mapbox route setup (live data from glide-backend) ──────────────────────
+// ─── Mapbox route setup (live data) ─────────────────────────────────────────
 function setupLiveRouteAnimation(map, intervalRef, route) {
   const coords = route.geometry.coordinates;
   const color = scoreToColor(route.accessibility_score);
@@ -191,7 +196,6 @@ function setupLiveRouteAnimation(map, intervalRef, route) {
   new mapboxgl.Marker({ element: mkEl('#0F1F3D') }).setLngLat(coords[0]).addTo(map);
   new mapboxgl.Marker({ element: mkEl('#2ECC71') }).setLngLat(coords[coords.length - 1]).addTo(map);
 
-  // Fit bounds to the route with a little padding for the bottom sheet.
   const lngs = coords.map((c) => c[0]);
   const lats = coords.map((c) => c[1]);
   map.fitBounds(
@@ -200,19 +204,162 @@ function setupLiveRouteAnimation(map, intervalRef, route) {
   );
 }
 
+// ─── Convert API obstacle payload into Mapbox sources ───────────────────────
+function obstaclesToFeatureCollections(payload) {
+  const out = {
+    osmPoints: { type: 'FeatureCollection', features: [] },
+    osmLines: { type: 'FeatureCollection', features: [] },
+    construction: { type: 'FeatureCollection', features: [] },
+    reports: { type: 'FeatureCollection', features: [] },
+  };
+  // OSM permanent
+  if (payload.osm) {
+    for (const layer of Object.values(payload.osm)) {
+      for (const el of layer.elements ?? []) {
+        if (el.type === 'way' && Array.isArray(el.geometry) && el.geometry.length >= 2) {
+          out.osmLines.features.push({
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: el.geometry.map((p) => [p.lon, p.lat]),
+            },
+            properties: el.tags ?? {},
+          });
+        } else if (el.type === 'node' && el.lat != null && el.lon != null) {
+          out.osmPoints.features.push({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [el.lon, el.lat] },
+            properties: el.tags ?? {},
+          });
+        }
+      }
+    }
+  }
+  // WIOR construction
+  for (const c of payload.construction ?? []) {
+    out.construction.features.push({
+      type: 'Feature',
+      geometry: c.geometry,
+      properties: {
+        project_name: c.project_name,
+        type: c.type,
+        start_date: c.start_date,
+        end_date: c.end_date,
+      },
+    });
+  }
+  // Crowdsourced reports
+  for (const r of payload.reports ?? []) {
+    const meta = payload.categories?.[r.category];
+    out.reports.features.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [r.lng, r.lat] },
+      properties: {
+        category: r.category,
+        label: meta?.label ?? r.category,
+        emoji: meta?.emoji ?? '',
+        severity: meta?.severity ?? 'medium',
+        note: r.note ?? '',
+      },
+    });
+  }
+  return out;
+}
+
+const OBSTACLE_LAYER_IDS = [
+  'obstacles-construction-fill',
+  'obstacles-construction-line',
+  'obstacles-osm-lines',
+  'obstacles-osm-points',
+  'obstacles-reports',
+];
+
+function clearObstacleLayers(map) {
+  for (const id of OBSTACLE_LAYER_IDS) {
+    if (map.getLayer(id)) map.removeLayer(id);
+  }
+  for (const id of ['osm-points', 'osm-lines', 'construction', 'reports']) {
+    if (map.getSource(id)) map.removeSource(id);
+  }
+}
+
+function addObstacleLayers(map, fcs) {
+  map.addSource('construction', { type: 'geojson', data: fcs.construction });
+  map.addLayer({
+    id: 'obstacles-construction-fill',
+    type: 'fill',
+    source: 'construction',
+    paint: { 'fill-color': COLORS.construction, 'fill-opacity': 0.35 },
+  });
+  map.addLayer({
+    id: 'obstacles-construction-line',
+    type: 'line',
+    source: 'construction',
+    paint: { 'line-color': COLORS.construction, 'line-width': 1.5, 'line-opacity': 0.85 },
+  });
+
+  map.addSource('osm-lines', { type: 'geojson', data: fcs.osmLines });
+  map.addLayer({
+    id: 'obstacles-osm-lines',
+    type: 'line',
+    source: 'osm-lines',
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': COLORS.osm, 'line-width': 3, 'line-opacity': 0.7 },
+  });
+
+  map.addSource('osm-points', { type: 'geojson', data: fcs.osmPoints });
+  map.addLayer({
+    id: 'obstacles-osm-points',
+    type: 'circle',
+    source: 'osm-points',
+    paint: {
+      'circle-radius': 3.5,
+      'circle-color': COLORS.osm,
+      'circle-stroke-color': '#0F1F3D',
+      'circle-stroke-width': 0.5,
+      'circle-opacity': 0.85,
+    },
+  });
+
+  map.addSource('reports', { type: 'geojson', data: fcs.reports });
+  map.addLayer({
+    id: 'obstacles-reports',
+    type: 'circle',
+    source: 'reports',
+    paint: {
+      'circle-radius': [
+        'match',
+        ['get', 'severity'],
+        'high', 9,
+        'medium', 7,
+        'low', 5,
+        7,
+      ],
+      'circle-color': COLORS.report,
+      'circle-stroke-color': 'white',
+      'circle-stroke-width': 2,
+      'circle-opacity': 0.95,
+    },
+  });
+}
+
 // ─── Screen component ────────────────────────────────────────────────────────
 export default function MapScreen({ onNavigate, routeData }) {
   const { t } = useLanguage();
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const intervalRef = useRef(null);
-  const [mapReady, setMapReady] = useState(false);
+  const [, setMapReady] = useState(false);
   const [mapError, setMapError] = useState(!MAPBOX_TOKEN);
-  const [showDirections, setShowDirections] = useState(false);
+
+  const [showObstacles, setShowObstacles] = useState(false);
+  const [obstacles, setObstacles] = useState(null);
+  const [obstaclesLoading, setObstaclesLoading] = useState(false);
 
   const liveRoute = routeData?.routes?.[0] ?? null;
   const liveCoords = liveRoute?.geometry?.coordinates ?? null;
 
+  // Initialise the map once. Re-runs only when the route identity changes.
   useEffect(() => {
     if (!MAPBOX_TOKEN) return;
 
@@ -260,9 +407,34 @@ export default function MapScreen({ onNavigate, routeData }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveRoute]);
 
+  // Fetch obstacles the first time the toggle is enabled.
+  useEffect(() => {
+    if (!showObstacles || obstacles || obstaclesLoading) return;
+    setObstaclesLoading(true);
+    getObstacles({ osm: true })
+      .then(setObstacles)
+      .catch(() => setObstacles({ reports: [], construction: [], osm: null, categories: {} }))
+      .finally(() => setObstaclesLoading(false));
+  }, [showObstacles, obstacles, obstaclesLoading]);
+
+  // Add / remove the obstacle layers on the map when toggle or data changes.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const apply = () => {
+      clearObstacleLayers(map);
+      if (showObstacles && obstacles) {
+        addObstacleLayers(map, obstaclesToFeatureCollections(obstacles));
+      }
+    };
+
+    if (map.isStyleLoaded()) apply();
+    else map.once('idle', apply);
+  }, [showObstacles, obstacles]);
+
   const showFallback = mapError || !MAPBOX_TOKEN;
 
-  // From / To labels in the bottom sheet — prefer real geocoded names.
   const fromLabel = routeData?.from?.display_name?.split(',')[0] ?? t('routeFrom');
   const toLabel = routeData?.to?.display_name?.split(',')[0] ?? t('routeTo');
 
@@ -277,7 +449,6 @@ export default function MapScreen({ onNavigate, routeData }) {
 
       {/* Top bar */}
       <div className="absolute top-0 left-0 right-0 flex items-start justify-between px-4 pt-12 pb-3 pointer-events-none z-20">
-        {/* Back button */}
         <motion.button
           initial={{ opacity: 0, x: -12 }}
           animate={{ opacity: 1, x: 0 }}
@@ -292,14 +463,12 @@ export default function MapScreen({ onNavigate, routeData }) {
           </svg>
         </motion.button>
 
-        {/* Legend + language toggle */}
         <motion.div
           initial={{ opacity: 0, x: 12 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.25 }}
           className="pointer-events-auto flex flex-col items-stretch gap-1.5 bg-black/40 backdrop-blur-md rounded-2xl px-3 py-2.5 shadow-card border border-white/10"
         >
-          {/* Live indicator */}
           <div className="flex items-center gap-1.5">
             <div className="relative w-2 h-2 flex-shrink-0">
               <div className="absolute inset-0 rounded-full bg-accessible animate-ping opacity-75" />
@@ -311,9 +480,57 @@ export default function MapScreen({ onNavigate, routeData }) {
           <LegendRow color="bg-accessible" label={t('legendAccessible')} />
           <LegendRow color="bg-moderate"   label={t('legendModerate')}   />
           <LegendRow color="bg-difficult"  label={t('legendDifficult')}  />
+          {showObstacles && (
+            <>
+              <div className="w-full h-px bg-white/15 my-0.5" aria-hidden="true" />
+              <LegendDot color={COLORS.osm}          label={t('layerOsm')}          />
+              <LegendDot color={COLORS.construction} label={t('layerConstruction')} />
+              <LegendDot color={COLORS.report}       label={t('layerReports')}      />
+            </>
+          )}
           <div className="w-full h-px bg-white/15 my-0.5" aria-hidden="true" />
           <LanguageToggle variant="map" />
         </motion.div>
+      </div>
+
+      {/* Right-side floating action stack: obstructions toggle + report */}
+      <div className="absolute right-4 bottom-[340px] z-20 flex flex-col items-center gap-3">
+        <motion.button
+          initial={{ opacity: 0, scale: 0.7 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.55, duration: 0.4, type: 'spring', stiffness: 200, damping: 18 }}
+          whileTap={{ scale: 0.9 }}
+          onClick={() => setShowObstacles((v) => !v)}
+          aria-pressed={showObstacles}
+          aria-label={t('toggleObstructions')}
+          className={`w-14 h-14 rounded-full flex items-center justify-center border shadow-[0_4px_20px_rgba(0,0,0,0.55)] transition-colors ${
+            showObstacles
+              ? 'bg-white text-navy border-white'
+              : 'bg-navy text-white border-white/20'
+          }`}
+        >
+          {obstaclesLoading ? <SpinnerIcon /> : <LayersIcon />}
+        </motion.button>
+        <span className="font-body text-xs text-white/65 font-medium -mt-1.5">
+          {t('toggleObstructionsShort')}
+        </span>
+
+        <motion.button
+          initial={{ opacity: 0, scale: 0.7 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.7, duration: 0.4, type: 'spring', stiffness: 200, damping: 18 }}
+          whileTap={{ scale: 0.9 }}
+          onClick={() => onNavigate('report')}
+          className="w-14 h-14 rounded-full bg-navy shadow-[0_4px_20px_rgba(0,0,0,0.55)] flex items-center justify-center border border-white/20"
+          aria-label="Report obstruction"
+        >
+          <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" aria-hidden="true">
+            <rect x="2" y="7" width="20" height="14" rx="3" stroke="white" strokeWidth="1.8"/>
+            <circle cx="12" cy="13.5" r="3.5" stroke="white" strokeWidth="1.8"/>
+            <path d="M8 7l1.5-2.5h5L16 7" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </motion.button>
+        <span className="font-body text-xs text-white/65 font-medium -mt-1.5">Report</span>
       </div>
 
       {/* Route card — slides up from bottom */}
@@ -326,7 +543,6 @@ export default function MapScreen({ onNavigate, routeData }) {
         <div className="bg-cream rounded-t-3xl px-5 pt-4 pb-8 shadow-[0_-8px_40px_rgba(0,0,0,0.4)]">
           <div className="w-10 h-1 bg-navy/15 rounded-full mx-auto mb-4" aria-hidden="true" />
 
-          {/* Origin → Destination */}
           <div className="flex items-center gap-2 mb-4 overflow-hidden">
             <span className="font-body text-sm text-navy/50 font-medium truncate flex-shrink-0">
               {fromLabel}
@@ -339,53 +555,9 @@ export default function MapScreen({ onNavigate, routeData }) {
             </span>
           </div>
 
-          <RouteCard onViewSteps={() => setShowDirections(true)} liveRoute={liveRoute} />
+          <RouteCard liveRoute={liveRoute} />
         </div>
       </motion.div>
-
-      {/* Report button — floats above route card */}
-      {!showDirections && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.7 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.7, duration: 0.4, type: 'spring', stiffness: 200, damping: 18 }}
-          className="absolute bottom-[340px] right-4 z-20 flex flex-col items-center gap-1.5"
-        >
-          <motion.button
-            whileTap={{ scale: 0.9 }}
-            onClick={() => onNavigate('report')}
-            className="w-14 h-14 rounded-full bg-navy shadow-[0_4px_20px_rgba(0,0,0,0.55)] flex items-center justify-center border border-white/20"
-            aria-label="Report obstruction"
-          >
-            <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" aria-hidden="true">
-              <rect x="2" y="7" width="20" height="14" rx="3" stroke="white" strokeWidth="1.8"/>
-              <circle cx="12" cy="13.5" r="3.5" stroke="white" strokeWidth="1.8"/>
-              <path d="M8 7l1.5-2.5h5L16 7" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </motion.button>
-          <span className="font-body text-xs text-white/65 font-medium">Report</span>
-        </motion.div>
-      )}
-
-      {/* Directions bottom sheet */}
-      <AnimatePresence>
-        {showDirections && (
-          <motion.div
-            initial={{ y: '100%' }}
-            animate={{ y: 0 }}
-            exit={{ y: '100%' }}
-            transition={{ duration: 0.48, ease: [0.22, 1, 0.36, 1] }}
-            className="absolute inset-x-0 bottom-0 z-30 h-[92%] rounded-t-3xl overflow-hidden shadow-[0_-8px_48px_rgba(0,0,0,0.55)]"
-          >
-            <DirectionsScreen
-              onNavigate={(target) => {
-                if (target === 'map') setShowDirections(false);
-                else onNavigate(target);
-              }}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }
@@ -396,5 +568,36 @@ function LegendRow({ color, label }) {
       <div className={`w-3 h-3 rounded-full ${color} flex-shrink-0`} aria-hidden="true" />
       <span className="font-body text-xs text-white/85 font-medium">{label}</span>
     </div>
+  );
+}
+
+function LegendDot({ color, label }) {
+  return (
+    <div className="flex items-center gap-2.5 w-full">
+      <div
+        className="w-3 h-3 rounded-full flex-shrink-0"
+        style={{ background: color }}
+        aria-hidden="true"
+      />
+      <span className="font-body text-xs text-white/85 font-medium">{label}</span>
+    </div>
+  );
+}
+
+function LayersIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" aria-hidden="true">
+      <path d="M12 3l9 5-9 5-9-5 9-5z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M3 13l9 5 9-5" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M3 17l9 5 9-5" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function SpinnerIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="w-6 h-6 animate-spin" aria-hidden="true">
+      <circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeDasharray="12 36" opacity="0.85" />
+    </svg>
   );
 }
