@@ -494,7 +494,9 @@ export default function MapScreen({ onNavigate, routeData }) {
 
       const map = new mapboxgl.Map({
         container: mapContainerRef.current,
-        style: 'mapbox://styles/mapbox/navigation-night-v1',
+        // traffic-night-v2 = same dark navigation aesthetic + Mapbox live
+        // traffic congestion overlay (green / orange / red / dark red).
+        style: 'mapbox://styles/mapbox/traffic-night-v2',
         center,
         zoom: 13.5,
         attributionControl: false,

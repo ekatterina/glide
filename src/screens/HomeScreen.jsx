@@ -45,7 +45,7 @@ export default function HomeScreen({ onNavigate, onRoutePlanned, existingRoute }
 
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
-      style: 'mapbox://styles/mapbox/navigation-night-v1',
+      style: 'mapbox://styles/mapbox/traffic-night-v2',
       center: [4.9020, 52.3710],
       zoom: 13.6,
       interactive: false,
