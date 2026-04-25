@@ -253,6 +253,53 @@ function restyleSelectedRoute(map, routes, selectedIndex) {
   }
 }
 
+// ─── Route corridor filter ──────────────────────────────────────────────────
+// Keeps only the obstacles within `bufferMeters` of any vertex of any active
+// route. Without this filter the city-wide OSM dump (5k+ features) drowns the
+// map; with it the user only sees what actually affects their trip.
+function filterToRouteCorridor(fc, routes, bufferMeters = 150) {
+  if (!routes || routes.length === 0) return fc;
+
+  // Collect all vertices from all routes.
+  const verts = [];
+  for (const r of routes) {
+    for (const c of r.geometry?.coordinates ?? []) verts.push(c);
+  }
+  if (verts.length === 0) return fc;
+
+  // Convert buffer to lat/lng degrees (cheap; fine for short distances).
+  const latBuf = bufferMeters / 111000;
+  const cosLat = Math.cos((verts[0][1] * Math.PI) / 180);
+  const lngBuf = bufferMeters / (111000 * Math.max(0.1, cosLat));
+
+  const near = (lng, lat) => {
+    for (const [vlng, vlat] of verts) {
+      if (Math.abs(lat - vlat) <= latBuf && Math.abs(lng - vlng) <= lngBuf) return true;
+    }
+    return false;
+  };
+
+  return {
+    type: 'FeatureCollection',
+    features: fc.features.filter((f) => {
+      const g = f.geometry;
+      if (!g) return false;
+      if (g.type === 'Point') return near(g.coordinates[0], g.coordinates[1]);
+      if (g.type === 'LineString') return g.coordinates.some(([lng, lat]) => near(lng, lat));
+      if (g.type === 'Polygon') {
+        const ring = g.coordinates[0] ?? [];
+        return ring.some(([lng, lat]) => near(lng, lat));
+      }
+      if (g.type === 'MultiPolygon') {
+        return g.coordinates.some((poly) =>
+          (poly[0] ?? []).some(([lng, lat]) => near(lng, lat)),
+        );
+      }
+      return false;
+    }),
+  };
+}
+
 // ─── Convert API obstacle payload into Mapbox sources ───────────────────────
 function obstaclesToFeatureCollections(payload) {
   const out = {
@@ -321,6 +368,66 @@ function clearObstacleLayers(map) {
   }
 }
 
+// ─── Mapbox popups for each obstacle layer ──────────────────────────────────
+// Registered once on first toggle-on; fire only when their layer exists.
+let popupHandlersRegistered = false;
+const popupKeptTags = ['name', 'highway', 'surface', 'smoothness', 'wheelchair', 'incline', 'width', 'sidewalk:width', 'kerb', 'kerb:height', 'barrier'];
+
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function osmPopupHtml(props) {
+  const tags = Object.entries(props)
+    .filter(([k, v]) => popupKeptTags.includes(k) && v !== null && v !== '')
+    .map(([k, v]) => `<div><span style="opacity:.6">${escapeHtml(k)}</span> ${escapeHtml(v)}</div>`)
+    .join('');
+  return `<div style="font-family:'DM Sans',sans-serif;font-size:12px;color:#0F1F3D;min-width:180px"><div style="font-weight:700;margin-bottom:4px">OSM feature</div>${tags || '<i style="opacity:.5">no relevant tags</i>'}</div>`;
+}
+
+function constructionPopupHtml(props) {
+  return `<div style="font-family:'DM Sans',sans-serif;font-size:12px;color:#0F1F3D;max-width:260px">
+    <div style="font-weight:700;margin-bottom:4px">🏗️ ${escapeHtml(props.project_name || 'Construction')}</div>
+    <div style="opacity:.7">${escapeHtml(props.type || '')}</div>
+    <div style="opacity:.5;font-size:11px;margin-top:4px">${escapeHtml(props.start_date)} → ${escapeHtml(props.end_date)}</div>
+  </div>`;
+}
+
+function reportPopupHtml(props) {
+  return `<div style="font-family:'DM Sans',sans-serif;font-size:12px;color:#0F1F3D;max-width:240px">
+    <div style="font-weight:700;margin-bottom:4px">${props.emoji || ''} ${escapeHtml(props.label || props.category)}</div>
+    <div style="opacity:.7">${escapeHtml(props.note || '')}</div>
+    <div style="opacity:.5;font-size:11px;margin-top:4px">severity: ${escapeHtml(props.severity)}</div>
+  </div>`;
+}
+
+function setupObstaclePopups(map) {
+  if (popupHandlersRegistered) return;
+  popupHandlersRegistered = true;
+
+  const popup = new mapboxgl.Popup({ closeButton: true, closeOnClick: true, maxWidth: '280px' });
+
+  const showAt = (e, html) => {
+    popup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+  };
+
+  map.on('click', 'obstacles-osm-points',  (e) => showAt(e, osmPopupHtml(e.features[0].properties)));
+  map.on('click', 'obstacles-osm-lines',   (e) => showAt(e, osmPopupHtml(e.features[0].properties)));
+  map.on('click', 'obstacles-construction-fill', (e) => showAt(e, constructionPopupHtml(e.features[0].properties)));
+  map.on('click', 'obstacles-construction-line', (e) => showAt(e, constructionPopupHtml(e.features[0].properties)));
+  map.on('click', 'obstacles-reports',     (e) => showAt(e, reportPopupHtml(e.features[0].properties)));
+
+  for (const id of OBSTACLE_LAYER_IDS) {
+    map.on('mouseenter', id, () => { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; });
+  }
+}
+
 function addObstacleLayers(map, fcs) {
   map.addSource('construction', { type: 'geojson', data: fcs.construction });
   map.addLayer({
@@ -351,11 +458,11 @@ function addObstacleLayers(map, fcs) {
     type: 'circle',
     source: 'osm-points',
     paint: {
-      'circle-radius': 3.5,
+      'circle-radius': 4,
       'circle-color': COLORS.osm,
       'circle-stroke-color': '#0F1F3D',
-      'circle-stroke-width': 0.5,
-      'circle-opacity': 0.85,
+      'circle-stroke-width': 1,
+      'circle-opacity': 0.9,
     },
   });
 
@@ -462,19 +569,28 @@ export default function MapScreen({ onNavigate, routeData }) {
       .finally(() => setObstaclesLoading(false));
   }, [showObstacles, obstacles, obstaclesLoading]);
 
-  // Apply obstacle layers when toggle / data changes.
+  // Apply obstacle layers when toggle / data / route changes.
+  // Filter to the route corridor so the map stays interpretable — only show
+  // obstacles within ~150m of any active route polyline.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     const apply = () => {
       clearObstacleLayers(map);
-      if (showObstacles && obstacles) {
-        addObstacleLayers(map, obstaclesToFeatureCollections(obstacles));
-      }
+      if (!(showObstacles && obstacles && routes.length > 0)) return;
+      const fcs = obstaclesToFeatureCollections(obstacles);
+      const filtered = {
+        osmPoints: filterToRouteCorridor(fcs.osmPoints, routes),
+        osmLines: filterToRouteCorridor(fcs.osmLines, routes),
+        construction: filterToRouteCorridor(fcs.construction, routes),
+        reports: filterToRouteCorridor(fcs.reports, routes),
+      };
+      addObstacleLayers(map, filtered);
+      setupObstaclePopups(map);
     };
     if (map.isStyleLoaded()) apply();
     else map.once('idle', apply);
-  }, [showObstacles, obstacles]);
+  }, [showObstacles, obstacles, routes]);
 
   const showFallback = mapError || !MAPBOX_TOKEN;
   const fromLabel = routeData?.from?.display_name?.split(',')[0] ?? t('routeFrom');
