@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://glide-server-placeholder.vercel.app/api/:path*"
+      "destination": "https://glide-server.vercel.app/api/:path*"
     }
   ]
 }
