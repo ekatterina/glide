@@ -73,10 +73,16 @@ export type ConstructionZone = {
   geometry: { type: "Polygon" | "MultiPolygon"; coordinates: unknown };
 };
 
-const REPORTS_PATH = path.join(process.cwd(), "scripts", "data", "reports.json");
+export const REPORTS_PATH = path.join(process.cwd(), "scripts", "data", "reports.json");
 const WIOR_URL = "https://api.data.amsterdam.nl/v1/wior/wior/";
 
-export async function loadReports(): Promise<Report[]> {
+// In-memory cache of all reports — seeded from disk on first read.
+// On Vercel the filesystem is read-only at runtime, so saves are appended
+// here only and persist for the lifetime of the function instance.
+// In local dev we still write back to disk for full persistence.
+let reportsCache: Report[] | null = null;
+
+async function readReportsFromDisk(): Promise<Report[]> {
   try {
     const raw = await readFile(REPORTS_PATH, "utf8");
     const parsed = JSON.parse(raw) as { reports?: Report[] };
@@ -88,6 +94,26 @@ export async function loadReports(): Promise<Report[]> {
     return valid;
   } catch {
     return [];
+  }
+}
+
+export async function loadReports(): Promise<Report[]> {
+  if (reportsCache === null) {
+    reportsCache = await readReportsFromDisk();
+  }
+  return reportsCache;
+}
+
+export async function appendReport(report: Report): Promise<void> {
+  const reports = await loadReports();
+  reports.push(report);
+  // Best-effort write back to disk. Fails silently on read-only filesystems
+  // (e.g. Vercel runtime) — in-memory state is enough for the demo session.
+  try {
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(REPORTS_PATH, JSON.stringify({ reports }, null, 2));
+  } catch {
+    // ignore — Vercel read-only FS path
   }
 }
 

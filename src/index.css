@@ -17,6 +17,18 @@ body,
   padding: 0;
   overflow: hidden;
   font-family: 'DM Sans', sans-serif;
+  /* iOS Safari: keep things from rubber-banding behind the UI */
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Reserve safe-area for the iPhone notch / home-indicator */
+@supports (padding: env(safe-area-inset-top)) {
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
 }
 
 /* Smooth scrolling for direction list */

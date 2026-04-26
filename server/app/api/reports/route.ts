@@ -1,15 +1,12 @@
 import { NextResponse } from "next/server";
-import { readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
 import {
   classifyPhoto,
   ClassifyError,
   CATEGORY_KEYS,
   type Classification,
 } from "@/lib/classify";
-import type { Report } from "@/lib/obstacles";
+import { appendReport, type Report } from "@/lib/obstacles";
 
-const REPORTS_PATH = path.join(process.cwd(), "scripts", "data", "reports.json");
 const DEMO_IMAGE_URL =
   "https://upload.wikimedia.org/wikipedia/commons/thumb/4/40/Bicycles_parked_along_the_canals_of_Amsterdam_%282%29.jpg/640px-Bicycles_parked_along_the_canals_of_Amsterdam_%282%29.jpg";
 
@@ -127,16 +124,6 @@ async function handleSave(body: SaveBody) {
     );
   }
 
-  // Append to reports.json. Hackathon-grade storage; not concurrent-safe.
-  let store: { reports: Report[] };
-  try {
-    const raw = await readFile(REPORTS_PATH, "utf8");
-    store = JSON.parse(raw);
-    if (!Array.isArray(store.reports)) store.reports = [];
-  } catch {
-    store = { reports: [] };
-  }
-
   const id = `r-${Date.now().toString(36)}`;
   const combinedNote = note?.trim()
     ? `${classification.description} — ${note.trim()}`
@@ -151,8 +138,7 @@ async function handleSave(body: SaveBody) {
     reported_at: new Date().toISOString().slice(0, 10),
   };
 
-  store.reports.push(newReport);
-  await writeFile(REPORTS_PATH, JSON.stringify(store, null, 2));
+  await appendReport(newReport);
 
   return NextResponse.json({ report: newReport, classification });
 }
