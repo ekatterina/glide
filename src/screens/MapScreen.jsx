@@ -747,7 +747,7 @@ export default function MapScreen({ onNavigate, routeData }) {
       <div
         className="absolute right-4 z-20 flex flex-col items-end gap-2"
         style={{
-          bottom: showObstacles ? 52 : 'calc(46vh + 16px)',
+          bottom: showObstacles ? 52 : 'calc(52svh + 16px)',
           transition: 'bottom 0.4s cubic-bezier(0.22, 1, 0.36, 1)',
         }}
       >
@@ -806,7 +806,7 @@ export default function MapScreen({ onNavigate, routeData }) {
       {/* Bottom sheet — collapses to drag-handle only when layers panel is open */}
       <motion.div
         initial={{ y: '100%', opacity: 0 }}
-        animate={{ y: 0, opacity: 1, height: showObstacles ? 32 : '46vh' }}
+        animate={{ y: 0, opacity: 1, height: showObstacles ? 32 : '52svh' }}
         transition={{
           y:       { delay: 0.4, duration: 0.55, ease: [0.22, 1, 0.36, 1] },
           opacity: { delay: 0.4, duration: 0.55 },
@@ -892,7 +892,7 @@ export default function MapScreen({ onNavigate, routeData }) {
         transition={{ delay: 0.7, duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
         className="absolute left-0 right-0 z-20 flex justify-center px-5 pointer-events-none"
         style={{
-          bottom: showObstacles ? 40 : 'calc(46vh + 12px)',
+          bottom: showObstacles ? 40 : 'calc(52svh + 12px)',
           transition: 'bottom 0.4s cubic-bezier(0.22, 1, 0.36, 1)',
         }}
       >
