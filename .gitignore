@@ -14,3 +14,4 @@ dist/
 /server/*.tsbuildinfo
 /server/next-env.d.ts
 /server/scripts/output/
+.vercel
