@@ -877,8 +877,9 @@ export default function MapScreen({ onNavigate, routeData }) {
             </div>
           </div>
 
-          {/* Scrollable route details */}
-          <div className="flex-1 overflow-y-auto px-5 pb-6">
+          {/* Scrollable route details — safe-bottom keeps last button above
+              the iPhone home indicator and any URL-bar overshoot. */}
+          <div className="flex-1 overflow-y-auto px-5 safe-bottom">
             <RouteCard liveRoute={liveRoute} />
           </div>
         </div>

@@ -214,7 +214,7 @@ function CameraStep({ onTakePhoto, onDemo, onBack, t }) {
         </div>
       </div>
 
-      <div className="flex-shrink-0 pb-12 flex flex-col items-center gap-4">
+      <div className="flex-shrink-0 safe-bottom flex flex-col items-center gap-4 pt-4">
         <motion.button
           whileTap={{ scale: 0.9 }}
           onClick={onTakePhoto}
@@ -318,7 +318,7 @@ function ResultStep({ photoFile, usedDemo, classification, location, saving, err
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-      className="flex flex-col h-full px-5 pt-14 pb-8"
+      className="flex flex-col h-full px-5 pt-14 safe-bottom"
     >
       <h1 className="font-display font-bold text-cream text-xl mb-5">{t('reportVerdictLabel')}</h1>
 

@@ -23,12 +23,15 @@ body,
   -webkit-font-smoothing: antialiased;
 }
 
-/* Reserve safe-area for the iPhone notch / home-indicator */
-@supports (padding: env(safe-area-inset-top)) {
-  body {
-    padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
-  }
+/* Use the dynamic viewport height where supported — iOS Safari's URL bar
+   eats real pixels that 100vh ignores. dvh always reflects the visible area. */
+@supports (height: 100dvh) {
+  html, body, #root { height: 100dvh; }
+}
+
+/* Bottom-sheets pin to bottom:0 — pad them above the iPhone home indicator. */
+.safe-bottom {
+  padding-bottom: max(2rem, env(safe-area-inset-bottom));
 }
 
 /* Smooth scrolling for direction list */

@@ -44,9 +44,12 @@ export default function App() {
 
   return (
     <LanguageProvider>
-      <div className="min-h-screen bg-navy flex items-center justify-center">
+      {/* min-h-dvh + h-dvh use the *visible* viewport on iOS Safari (URL bar
+          subtracted), so bottom buttons stay reachable. Falls back to vh
+          on browsers that don't support dvh. */}
+      <div className="min-h-screen min-h-dvh bg-navy flex items-center justify-center">
         <div className="hidden sm:block absolute inset-0 bg-navy" aria-hidden="true" />
-        <div className="relative w-full max-w-[390px] h-screen overflow-hidden bg-cream shadow-[0_0_80px_rgba(0,0,0,0.4)]">
+        <div className="relative w-full max-w-[390px] h-screen h-dvh overflow-hidden bg-cream shadow-[0_0_80px_rgba(0,0,0,0.4)]">
           <AnimatePresence custom={direction} mode="wait">
             <motion.div
               key={screen}

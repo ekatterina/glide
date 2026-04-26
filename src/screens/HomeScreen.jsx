@@ -232,7 +232,7 @@ export default function HomeScreen({ onNavigate, onRoutePlanned, existingRoute }
         initial={{ y: 60, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ delay: 0.2, duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-        className="absolute bottom-0 left-0 right-0 z-20 bg-cream rounded-t-3xl px-5 pt-4 pb-8 shadow-[0_-12px_48px_rgba(0,0,0,0.35)]"
+        className="absolute bottom-0 left-0 right-0 z-20 bg-cream rounded-t-3xl px-5 pt-4 safe-bottom shadow-[0_-12px_48px_rgba(0,0,0,0.35)]"
       >
         {/* Handle */}
         <div className="w-10 h-1 bg-navy/15 rounded-full mx-auto mb-4" aria-hidden="true" />
