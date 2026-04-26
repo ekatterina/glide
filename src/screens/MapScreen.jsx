@@ -15,11 +15,35 @@ const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 // green for the recommended pick, then orange and red for alternatives.
 const ROUTE_COLORS = ['#2ECC71', '#F39C12', '#E74C3C']; // green / orange / red
 
-// ─── Obstruction layer colours ──────────────────────────────────────────────
+// ─── OSM obstacle categories ────────────────────────────────────────────────
+const OSM_CAT = {
+  cobblestone:        { emoji: '🪨', label: 'Cobblestones',             color: '#F59E0B', group: 'surface',     desc: 'Cobblestone or rough paving that is hard to navigate in a wheelchair.' },
+  bad_smoothness:     { emoji: '〰️', label: 'Bad smoothness',           color: '#EAB308', group: 'surface',     desc: 'Uneven surface that may be uncomfortable or difficult to cross.' },
+  steep:              { emoji: '📐', label: 'Steep way',                 color: '#3B82F6', group: 'surface',     desc: 'A steep incline that may be challenging for wheelchair users.' },
+  steps:              { emoji: '🚫', label: 'Steps',                     color: '#EF4444', group: 'access',      desc: 'Steps or stairs with no accessible alternative nearby.' },
+  wheelchair_no:      { emoji: '♿', label: 'Wheelchair inaccessible',   color: '#991B1B', group: 'access',      desc: 'Explicitly marked as not accessible for wheelchair users.' },
+  wheelchair_limited: { emoji: '⚠️', label: 'Limited access',           color: '#F97316', group: 'access',      desc: 'This location has restricted or limited wheelchair accessibility.' },
+  barriers:           { emoji: '🚧', label: 'Barrier',                   color: '#FF6B4A', group: 'physical',    desc: 'A physical barrier such as a gate, bollard, or chain.' },
+  high_kerbs:         { emoji: '⬆️', label: 'High kerb',                color: '#A855F7', group: 'physical',    desc: 'A raised kerb that is difficult to cross in a wheelchair.' },
+  narrow:             { emoji: '↔️', label: 'Narrow path',              color: '#14B8A6', group: 'physical',    desc: 'Path is narrower than 150 cm — may be hard to pass.' },
+};
+
+// Mapbox match expressions built from OSM_CAT
+const osmColorMatch = ['match', ['get', '_osm_category'],
+  ...Object.entries(OSM_CAT).flatMap(([k, v]) => [k, v.color]),
+  '#94A3B8',
+];
+const osmEmojiMatch = ['match', ['get', '_osm_category'],
+  'cobblestone', '🪨', 'bad_smoothness', '〰', 'steep', '📐',
+  'steps', '🚫', 'wheelchair_no', '♿', 'wheelchair_limited', '⚠',
+  'barriers', '🚧', 'high_kerbs', '⬆', 'narrow', '↔',
+  '',
+];
+
+// ─── Non-OSM layer colours ───────────────────────────────────────────────────
 const COLORS = {
-  osm: '#94A3B8',           // slate-400 — permanent OSM data
-  construction: '#F59E0B',  // amber-500 — live WIOR
-  report: '#EC4899',        // pink-500  — community reports
+  construction: '#F59E0B',
+  report: '#EC4899',
 };
 
 // ─── SVG fallback map (shown when token is absent) ──────────────────────────
@@ -285,19 +309,19 @@ function obstaclesToFeatureCollections(payload) {
     reports: { type: 'FeatureCollection', features: [] },
   };
   if (payload.osm) {
-    for (const layer of Object.values(payload.osm)) {
+    for (const [category, layer] of Object.entries(payload.osm)) {
       for (const el of layer.elements ?? []) {
         if (el.type === 'way' && Array.isArray(el.geometry) && el.geometry.length >= 2) {
           out.osmLines.features.push({
             type: 'Feature',
             geometry: { type: 'LineString', coordinates: el.geometry.map((p) => [p.lon, p.lat]) },
-            properties: el.tags ?? {},
+            properties: { ...(el.tags ?? {}), _osm_category: category },
           });
         } else if (el.type === 'node' && el.lat != null && el.lon != null) {
           out.osmPoints.features.push({
             type: 'Feature',
             geometry: { type: 'Point', coordinates: [el.lon, el.lat] },
-            properties: el.tags ?? {},
+            properties: { ...(el.tags ?? {}), _osm_category: category },
           });
         }
       }
@@ -332,6 +356,7 @@ const OBSTACLE_LAYER_IDS = [
   'obstacles-construction-line',
   'obstacles-osm-lines',
   'obstacles-osm-points',
+  'obstacles-osm-emoji',
   'obstacles-reports',
 ];
 
@@ -344,10 +369,9 @@ function clearObstacleLayers(map) {
   }
 }
 
-// ─── Mapbox popups for each obstacle layer ──────────────────────────────────
-// Registered once on first toggle-on; fire only when their layer exists.
+// ─── Obstacle interactions (hover tooltip + construction/report click popups) ─
+// Registered once per map instance; reset when the map is destroyed.
 let popupHandlersRegistered = false;
-const popupKeptTags = ['name', 'highway', 'surface', 'smoothness', 'wheelchair', 'incline', 'width', 'sidewalk:width', 'kerb', 'kerb:height', 'barrier'];
 
 function escapeHtml(s) {
   return String(s ?? '')
@@ -356,14 +380,6 @@ function escapeHtml(s) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
-}
-
-function osmPopupHtml(props) {
-  const tags = Object.entries(props)
-    .filter(([k, v]) => popupKeptTags.includes(k) && v !== null && v !== '')
-    .map(([k, v]) => `<div><span style="opacity:.6">${escapeHtml(k)}</span> ${escapeHtml(v)}</div>`)
-    .join('');
-  return `<div style="font-family:'DM Sans',sans-serif;font-size:12px;color:#0F1F3D;min-width:180px"><div style="font-weight:700;margin-bottom:4px">OSM feature</div>${tags || '<i style="opacity:.5">no relevant tags</i>'}</div>`;
 }
 
 function constructionPopupHtml(props) {
@@ -382,26 +398,70 @@ function reportPopupHtml(props) {
   </div>`;
 }
 
-function setupObstaclePopups(map) {
-  if (popupHandlersRegistered) return;
+// Returns { osmTooltip, clickPopup } so the caller can dismiss them when needed.
+function setupObstacleInteractions(map) {
+  if (popupHandlersRegistered) return { osmTooltip: null, clickPopup: null };
   popupHandlersRegistered = true;
 
-  const popup = new mapboxgl.Popup({ closeButton: true, closeOnClick: true, maxWidth: '280px' });
+  // ── Hover tooltip for OSM obstacle pins (no click) ──────────────────────
+  const osmTooltip = new mapboxgl.Popup({
+    closeButton: false,
+    closeOnClick: false,
+    offset: 10,
+    className: 'osm-tooltip',
+    maxWidth: 'none',
+  });
 
-  const showAt = (e, html) => {
-    popup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+  const showTooltip = (e) => {
+    const props = e.features[0].properties;
+    const cat = OSM_CAT[props._osm_category];
+    const text = cat ? `${cat.emoji} ${cat.label}` : (props._osm_category ?? 'Obstacle');
+    osmTooltip.setLngLat(e.lngLat).setHTML(escapeHtml(text)).addTo(map);
   };
 
-  map.on('click', 'obstacles-osm-points',  (e) => showAt(e, osmPopupHtml(e.features[0].properties)));
-  map.on('click', 'obstacles-osm-lines',   (e) => showAt(e, osmPopupHtml(e.features[0].properties)));
+  let touchTimer = null;
+  let touchHideTimer = null;
+
+  const OSM_HOVER_LAYERS = ['obstacles-osm-points', 'obstacles-osm-emoji', 'obstacles-osm-lines'];
+  for (const id of OSM_HOVER_LAYERS) {
+    map.on('mouseenter', id, (e) => { map.getCanvas().style.cursor = 'pointer'; showTooltip(e); });
+    map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; osmTooltip.remove(); });
+    map.on('touchstart', id, (e) => {
+      clearTimeout(touchTimer);
+      touchTimer = setTimeout(() => { showTooltip(e); touchTimer = null; }, 500);
+    });
+    map.on('touchend', id, () => {
+      clearTimeout(touchTimer); touchTimer = null;
+      // Keep tooltip visible briefly so the user can read it before lifting finger
+      touchHideTimer = setTimeout(() => osmTooltip.remove(), 1800);
+    });
+    map.on('touchcancel', id, () => {
+      clearTimeout(touchTimer); touchTimer = null;
+      clearTimeout(touchHideTimer); touchHideTimer = null;
+      osmTooltip.remove();
+    });
+  }
+  // Cancel long-press if the user moves their finger (scrolling the map)
+  map.on('touchmove', () => {
+    clearTimeout(touchTimer); touchTimer = null;
+    clearTimeout(touchHideTimer); touchHideTimer = null;
+    osmTooltip.remove();
+  });
+
+  // ── Click popups for construction zones and community reports ────────────
+  const clickPopup = new mapboxgl.Popup({ closeButton: true, closeOnClick: true, maxWidth: '280px' });
+  const showAt = (e, html) => clickPopup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+
   map.on('click', 'obstacles-construction-fill', (e) => showAt(e, constructionPopupHtml(e.features[0].properties)));
   map.on('click', 'obstacles-construction-line', (e) => showAt(e, constructionPopupHtml(e.features[0].properties)));
-  map.on('click', 'obstacles-reports',     (e) => showAt(e, reportPopupHtml(e.features[0].properties)));
+  map.on('click', 'obstacles-reports',           (e) => showAt(e, reportPopupHtml(e.features[0].properties)));
 
-  for (const id of OBSTACLE_LAYER_IDS) {
+  for (const id of ['obstacles-construction-fill', 'obstacles-construction-line', 'obstacles-reports']) {
     map.on('mouseenter', id, () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; });
   }
+
+  return { osmTooltip, clickPopup };
 }
 
 function addObstacleLayers(map, fcs) {
@@ -425,7 +485,7 @@ function addObstacleLayers(map, fcs) {
     type: 'line',
     source: 'osm-lines',
     layout: { 'line-cap': 'round', 'line-join': 'round' },
-    paint: { 'line-color': COLORS.osm, 'line-width': 3, 'line-opacity': 0.7 },
+    paint: { 'line-color': osmColorMatch, 'line-width': 3, 'line-opacity': 0.75 },
   });
 
   map.addSource('osm-points', { type: 'geojson', data: fcs.osmPoints });
@@ -434,12 +494,26 @@ function addObstacleLayers(map, fcs) {
     type: 'circle',
     source: 'osm-points',
     paint: {
-      'circle-radius': 4,
-      'circle-color': COLORS.osm,
-      'circle-stroke-color': '#0F1F3D',
-      'circle-stroke-width': 1,
-      'circle-opacity': 0.9,
+      'circle-radius': 8,
+      'circle-color': osmColorMatch,
+      'circle-stroke-color': 'white',
+      'circle-stroke-width': 2,
+      'circle-opacity': 0.92,
     },
+  });
+  map.addLayer({
+    id: 'obstacles-osm-emoji',
+    type: 'symbol',
+    source: 'osm-points',
+    layout: {
+      'text-field': osmEmojiMatch,
+      'text-size': 10,
+      'text-font': ['Arial Unicode MS Regular'],
+      'text-anchor': 'center',
+      'text-allow-overlap': true,
+      'text-ignore-placement': true,
+    },
+    paint: { 'text-color': '#ffffff' },
   });
 
   map.addSource('reports', { type: 'geojson', data: fcs.reports });
@@ -457,12 +531,49 @@ function addObstacleLayers(map, fcs) {
   });
 }
 
+// ─── Warning markers ────────────────────────────────────────────────────────
+const WARNING_COLORS = {
+  cobblestone: '#FF6B4A',
+  smoothness: '#FF6B4A',
+  incline: '#F59E0B',
+  wheelchair_limited: '#E74C3C',
+  edge_case: '#F59E0B',
+};
+
+function makeWarningEl(type) {
+  const color = WARNING_COLORS[type] ?? '#FF6B4A';
+  const el = document.createElement('div');
+  el.style.cssText = `width:10px;height:10px;border-radius:50%;background:${color};border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.55);cursor:pointer;flex-shrink:0;`;
+  return el;
+}
+
+function addWarningMarkers(map, route) {
+  if (!route?.warnings?.length) return [];
+  return route.warnings.map((w) => {
+    const [lat, lng] = w.location;
+    const popup = new mapboxgl.Popup({ closeButton: false, offset: 12, maxWidth: '220px' })
+      .setHTML(`<div style="font-family:'DM Sans',sans-serif;font-size:12px;color:#0F1F3D;padding:2px 0"><b>${escapeHtml(w.type.replace(/_/g, ' '))}</b><br/>${escapeHtml(w.message)}</div>`);
+    return new mapboxgl.Marker({ element: makeWarningEl(w.type) })
+      .setLngLat([lng, lat])
+      .setPopup(popup)
+      .addTo(map);
+  });
+}
+
+function clearWarningMarkers(ref) {
+  ref.current?.forEach((m) => m.remove());
+  ref.current = [];
+}
+
 // ─── Screen component ────────────────────────────────────────────────────────
 export default function MapScreen({ onNavigate, routeData }) {
   const { t } = useLanguage();
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const intervalRef = useRef(null);
+  const warningMarkersRef = useRef([]);
+  const osmTooltipRef = useRef(null);
+  const clickPopupRef = useRef(null);
   const [, setMapReady] = useState(false);
   const [mapError, setMapError] = useState(!MAPBOX_TOKEN);
 
@@ -507,6 +618,7 @@ export default function MapScreen({ onNavigate, routeData }) {
         if (!mounted) return;
         if (routes.length > 0) {
           setupLiveRoutes(map, routes, selectedIndex, setSelectedIndex);
+          warningMarkersRef.current = addWarningMarkers(map, routes[selectedIndex]);
         } else {
           setupMockRouteAnimation(map, intervalRef);
         }
@@ -521,56 +633,87 @@ export default function MapScreen({ onNavigate, routeData }) {
     return () => {
       mounted = false;
       if (intervalRef.current) clearInterval(intervalRef.current);
+      clearWarningMarkers(warningMarkersRef);
+      osmTooltipRef.current?.remove(); osmTooltipRef.current = null;
+      clickPopupRef.current?.remove(); clickPopupRef.current = null;
+      popupHandlersRegistered = false;
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeData]);
 
-  // Re-style when selection changes (without re-creating the map).
+  // Re-style routes + swap warning markers when selection changes.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || routes.length === 0) return;
-    const apply = () => restyleSelectedRoute(map, routes, selectedIndex);
+    const apply = () => {
+      restyleSelectedRoute(map, routes, selectedIndex);
+      clearWarningMarkers(warningMarkersRef);
+      warningMarkersRef.current = addWarningMarkers(map, routes[selectedIndex]);
+    };
     if (map.isStyleLoaded()) apply();
     else map.once('idle', apply);
   }, [selectedIndex, routes]);
 
-  // Fetch obstacles once on first toggle-on.
+  // Pre-fetch obstacles in the background once the map loads.
   useEffect(() => {
-    if (!showObstacles || obstacles || obstaclesLoading) return;
+    if (obstacles || obstaclesLoading) return;
     setObstaclesLoading(true);
     getObstacles({ osm: true })
       .then(setObstacles)
       .catch(() => setObstacles({ reports: [], construction: [], osm: null, categories: {} }))
       .finally(() => setObstaclesLoading(false));
-  }, [showObstacles, obstacles, obstaclesLoading]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeData]);
 
   // Apply obstacle layers when toggle / data / route changes.
-  // Filter to the route corridor so the map stays interpretable — only show
-  // obstacles within ~150m of any active route polyline.
+  // Layers are added once and then shown/hidden via visibility to avoid the
+  // expensive remove + re-add on every toggle.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     const apply = () => {
-      clearObstacleLayers(map);
-      if (!(showObstacles && obstacles && routes.length > 0)) return;
-      const fcs = obstaclesToFeatureCollections(obstacles);
-      const filtered = {
-        osmPoints: filterToRouteCorridor(fcs.osmPoints, routes),
-        osmLines: filterToRouteCorridor(fcs.osmLines, routes),
-        construction: filterToRouteCorridor(fcs.construction, routes),
-        reports: filterToRouteCorridor(fcs.reports, routes),
-      };
-      addObstacleLayers(map, filtered);
-      setupObstaclePopups(map);
+      const layersExist = OBSTACLE_LAYER_IDS.every((id) => !!map.getLayer(id));
+
+      if (showObstacles && obstacles && routes.length > 0) {
+        if (layersExist) {
+          OBSTACLE_LAYER_IDS.forEach((id) => map.setLayoutProperty(id, 'visibility', 'visible'));
+        } else {
+          clearObstacleLayers(map);
+          const fcs = obstaclesToFeatureCollections(obstacles);
+          const filtered = {
+            osmPoints: filterToRouteCorridor(fcs.osmPoints, routes),
+            osmLines: filterToRouteCorridor(fcs.osmLines, routes),
+            construction: filterToRouteCorridor(fcs.construction, routes),
+            reports: filterToRouteCorridor(fcs.reports, routes),
+          };
+          addObstacleLayers(map, filtered);
+          const { osmTooltip, clickPopup } = setupObstacleInteractions(map);
+          if (osmTooltip) osmTooltipRef.current = osmTooltip;
+          if (clickPopup) clickPopupRef.current = clickPopup;
+        }
+      } else {
+        // Dismiss any open tooltip or popup before hiding layers
+        osmTooltipRef.current?.remove();
+        clickPopupRef.current?.remove();
+        OBSTACLE_LAYER_IDS.forEach((id) => {
+          if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none');
+        });
+      }
     };
     if (map.isStyleLoaded()) apply();
     else map.once('idle', apply);
   }, [showObstacles, obstacles, routes]);
 
   const showFallback = mapError || !MAPBOX_TOKEN;
-  const fromLabel = routeData?.from?.display_name?.split(',')[0] ?? t('routeFrom');
-  const toLabel = routeData?.to?.display_name?.split(',')[0] ?? t('routeTo');
+
+  // Pick first part of display_name that contains a letter (skips bare house numbers like "67-3").
+  const pickLabel = (display_name, fallback) => {
+    const parts = display_name?.split(',') ?? [];
+    return parts.find(p => /[a-zA-Z]/.test(p))?.trim() ?? parts[0]?.trim() ?? fallback;
+  };
+  const fromLabel = pickLabel(routeData?.from?.display_name, t('routeFrom'));
+  const toLabel   = pickLabel(routeData?.to?.display_name,   t('routeTo'));
 
   return (
     <div className="relative w-full h-full bg-[#0F1F3D] overflow-hidden">
@@ -597,11 +740,45 @@ export default function MapScreen({ onNavigate, routeData }) {
           </svg>
         </motion.button>
 
-        <Legend t={t} showObstacles={showObstacles} />
+        <div className="pointer-events-auto"><LanguageToggle variant="map" /></div>
       </div>
 
-      {/* Right-side floating action stack */}
-      <div className="absolute right-4 bottom-[420px] z-20 flex flex-col items-center gap-3">
+      {/* Layers button + panel — anchored to bottom-right, slides with sheet */}
+      <div
+        className="absolute right-4 z-20 flex flex-col items-end gap-2"
+        style={{
+          bottom: showObstacles ? 52 : 'calc(46vh + 16px)',
+          transition: 'bottom 0.4s cubic-bezier(0.22, 1, 0.36, 1)',
+        }}
+      >
+        {/* Obstacle categories panel — opens upward from the button */}
+        <AnimatePresence>
+          {showObstacles && (
+            <motion.div
+              initial={{ opacity: 0, y: 8, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.95 }}
+              transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+              className="flex flex-col rounded-xl border shadow-card"
+              style={{
+                width: 160,
+                padding: 8,
+                background: 'rgba(15,31,61,0.75)',
+                backdropFilter: 'blur(10px)',
+                borderColor: 'rgba(255,255,255,0.12)',
+              }}
+            >
+              {LEGEND_GROUPS.flatMap(({ cats }) => cats).map((k) => (
+                <LegendDot key={k} color={OSM_CAT[k].color} label={OSM_CAT[k].label} />
+              ))}
+              <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '4px 0' }} />
+              <LegendDot color={COLORS.construction} label={t('layerConstruction')} />
+              <LegendDot color={COLORS.report}       label={t('layerReports')} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Toggle button — icon only, 44×44 */}
         <motion.button
           initial={{ opacity: 0, scale: 0.7 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -610,146 +787,147 @@ export default function MapScreen({ onNavigate, routeData }) {
           onClick={() => setShowObstacles((v) => !v)}
           aria-pressed={showObstacles}
           aria-label={t('toggleObstructions')}
-          className={`w-14 h-14 rounded-full flex items-center justify-center border shadow-[0_4px_20px_rgba(0,0,0,0.55)] transition-colors ${
-            showObstacles ? 'bg-white text-navy border-white' : 'bg-navy text-white border-white/20'
-          }`}
+          className="rounded-full flex items-center justify-center transition-colors"
+          style={{
+            width: 44,
+            height: 44,
+            background: showObstacles ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.18)',
+            backdropFilter: 'blur(14px) saturate(160%)',
+            WebkitBackdropFilter: 'blur(14px) saturate(160%)',
+            border: '1px solid rgba(255,255,255,0.30)',
+            color: showObstacles ? '#0F1F3D' : 'white',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.25)',
+          }}
         >
           {obstaclesLoading ? <SpinnerIcon /> : <LayersIcon />}
         </motion.button>
-        <span className="font-body text-xs text-white/65 font-medium -mt-1.5">
-          {t('toggleObstructionsShort')}
-        </span>
-
-        <motion.button
-          initial={{ opacity: 0, scale: 0.7 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.7, duration: 0.4, type: 'spring', stiffness: 200, damping: 18 }}
-          whileTap={{ scale: 0.9 }}
-          onClick={() => onNavigate('report')}
-          className="w-14 h-14 rounded-full bg-navy shadow-[0_4px_20px_rgba(0,0,0,0.55)] flex items-center justify-center border border-white/20"
-          aria-label="Report obstruction"
-        >
-          <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" aria-hidden="true">
-            <rect x="2" y="7" width="20" height="14" rx="3" stroke="white" strokeWidth="1.8"/>
-            <circle cx="12" cy="13.5" r="3.5" stroke="white" strokeWidth="1.8"/>
-            <path d="M8 7l1.5-2.5h5L16 7" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        </motion.button>
-        <span className="font-body text-xs text-white/65 font-medium -mt-1.5">Report</span>
       </div>
 
-      {/* Bottom sheet */}
+      {/* Bottom sheet — collapses to drag-handle only when layers panel is open */}
       <motion.div
         initial={{ y: '100%', opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ delay: 0.4, duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+        animate={{ y: 0, opacity: 1, height: showObstacles ? 32 : '46vh' }}
+        transition={{
+          y:       { delay: 0.4, duration: 0.55, ease: [0.22, 1, 0.36, 1] },
+          opacity: { delay: 0.4, duration: 0.55 },
+          height:  { duration: 0.4, ease: [0.22, 1, 0.36, 1] },
+        }}
         className="absolute bottom-0 left-0 right-0 z-20"
       >
-        <div className="bg-cream rounded-t-3xl px-5 pt-4 pb-8 shadow-[0_-8px_40px_rgba(0,0,0,0.4)]">
-          <div className="w-10 h-1 bg-navy/15 rounded-full mx-auto mb-4" aria-hidden="true" />
+        <div className="bg-cream rounded-t-3xl h-full flex flex-col overflow-hidden shadow-[0_-8px_40px_rgba(0,0,0,0.4)]">
+          {/* Fixed header */}
+          <div
+            className={`px-5 pt-3 flex-shrink-0 ${showObstacles ? 'cursor-pointer' : ''}`}
+            onClick={() => { if (showObstacles) setShowObstacles(false); }}
+          >
+            <div className="w-10 h-1 bg-navy/15 rounded-full mx-auto mb-3" aria-hidden="true" />
 
-          {/* Route alternatives selector */}
-          {routes.length > 1 && (
-            <div className="flex gap-2 mb-3">
-              {routes.map((r, i) => {
-                const isSel = i === selectedIndex;
-                return (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => setSelectedIndex(i)}
-                    className={`
-                      flex-1 rounded-2xl px-3 py-2.5 text-left transition-all
-                      border-2
-                      ${isSel ? 'bg-white shadow-card' : 'bg-navy/3 hover:bg-navy/6'}
-                    `}
-                    style={{
-                      borderColor: isSel ? ROUTE_COLORS[i] : 'transparent',
-                    }}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                        style={{ background: ROUTE_COLORS[i] }}
-                        aria-hidden="true"
-                      />
-                      <span className="font-display font-bold text-navy text-sm leading-none">
-                        {i === 0 ? t('routeBest') : `${t('routeAlt')} ${i}`}
-                      </span>
-                    </div>
-                    <div className="mt-1 flex items-baseline gap-1.5">
-                      <span className={`font-display font-bold text-lg leading-none ${
-                        r.accessibility_score >= 80 ? 'text-accessible'
-                        : r.accessibility_score >= 60 ? 'text-moderate'
-                        : 'text-difficult'
-                      }`}>
-                        {r.accessibility_score}
-                      </span>
-                      <span className="font-body text-[11px] text-navy/50">
-                        · {Math.round(r.distance_m)} m
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
+            {/* Route alternatives selector */}
+            {routes.length > 1 && (
+              <div className="flex gap-2 mb-3">
+                {routes.map((r, i) => {
+                  const isSel = i === selectedIndex;
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setSelectedIndex(i)}
+                      className={`
+                        flex-1 rounded-2xl px-3 py-2.5 text-left transition-all
+                        border-2
+                        ${isSel ? 'bg-white shadow-card' : 'bg-navy/3 hover:bg-navy/6'}
+                      `}
+                      style={{ borderColor: isSel ? ROUTE_COLORS[i] : 'transparent' }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                          style={{ background: ROUTE_COLORS[i] }}
+                          aria-hidden="true"
+                        />
+                        <span className="font-display font-bold text-navy text-sm leading-none">
+                          {i === 0 ? t('routeBest') : `${t('routeAlt')} ${i}`}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex items-baseline gap-1.5">
+                        <span className="font-display font-bold text-lg leading-none" style={{ color: ROUTE_COLORS[i] }}>
+                          {r.accessibility_score}
+                        </span>
+                        <span className="font-body text-[11px] text-navy/50">
+                          · {Math.round(r.distance_m)} m
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* From → To */}
+            <div className="flex items-center gap-2 mb-3 overflow-hidden">
+              <span className="font-body text-sm text-navy/50 font-medium truncate flex-shrink-0">
+                {fromLabel}
+              </span>
+              <svg viewBox="0 0 16 16" fill="none" className="w-4 h-4 flex-shrink-0" aria-hidden="true">
+                <path d="M3 8h10M9 4l4 4-4 4" stroke="#0F1F3D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.4" />
+              </svg>
+              <span className="font-body text-sm text-navy font-semibold truncate">
+                {toLabel}
+              </span>
             </div>
-          )}
-
-          {/* From → To */}
-          <div className="flex items-center gap-2 mb-4 overflow-hidden">
-            <span className="font-body text-sm text-navy/50 font-medium truncate flex-shrink-0">
-              {fromLabel}
-            </span>
-            <svg viewBox="0 0 16 16" fill="none" className="w-4 h-4 flex-shrink-0" aria-hidden="true">
-              <path d="M3 8h10M9 4l4 4-4 4" stroke="#0F1F3D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.4" />
-            </svg>
-            <span className="font-body text-sm text-navy font-semibold truncate">
-              {toLabel}
-            </span>
           </div>
 
-          <RouteCard liveRoute={liveRoute} />
+          {/* Scrollable route details */}
+          <div className="flex-1 overflow-y-auto px-5 pb-6">
+            <RouteCard liveRoute={liveRoute} />
+          </div>
         </div>
+      </motion.div>
+
+      {/* Report obstruction pill — rendered after the sheet so it stacks on top at the same z-level */}
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.7, duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+        className="absolute left-0 right-0 z-20 flex justify-center px-5 pointer-events-none"
+        style={{
+          bottom: showObstacles ? 40 : 'calc(46vh + 12px)',
+          transition: 'bottom 0.4s cubic-bezier(0.22, 1, 0.36, 1)',
+        }}
+      >
+        <motion.button
+          whileTap={{ scale: 0.96 }}
+          onClick={() => onNavigate('report')}
+          className="pointer-events-auto flex items-center gap-2.5 bg-[#FF6B4A] text-white rounded-full pl-1.5 pr-4 shadow-[0_4px_24px_rgba(255,107,74,0.5)] border border-white/20 whitespace-nowrap"
+          style={{ height: 44 }}
+          aria-label={t('reportTitle')}
+        >
+          <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
+            <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4" aria-hidden="true">
+              <rect x="2" y="7" width="20" height="14" rx="3" stroke="white" strokeWidth="2"/>
+              <circle cx="12" cy="13.5" r="3.5" stroke="white" strokeWidth="2"/>
+              <path d="M8 7l1.5-2.5h5L16 7" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </div>
+          <span className="font-bold text-sm">{t('reportTitle')}</span>
+        </motion.button>
       </motion.div>
     </div>
   );
 }
 
-function Legend({ t, showObstacles }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, x: 12 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: 0.25 }}
-      className="pointer-events-auto flex flex-col items-stretch gap-1.5 bg-black/40 backdrop-blur-md rounded-2xl px-3 py-2.5 shadow-card border border-white/10 max-w-[210px]"
-    >
-      <AnimatePresence initial={false}>
-        {showObstacles && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
-            className="overflow-hidden"
-          >
-            <LegendDot color={COLORS.osm}          label={t('layerOsm')}          />
-            <LegendDot color={COLORS.construction} label={t('layerConstruction')} />
-            <LegendDot color={COLORS.report}       label={t('layerReports')}      />
-            <div className="w-full h-px bg-white/15 my-1" aria-hidden="true" />
-          </motion.div>
-        )}
-      </AnimatePresence>
+const LEGEND_GROUPS = [
+  { key: 'surface',  label: 'Surface',  cats: ['cobblestone', 'bad_smoothness', 'steep'] },
+  { key: 'access',   label: 'Access',   cats: ['steps', 'wheelchair_no', 'wheelchair_limited'] },
+  { key: 'physical', label: 'Physical', cats: ['barriers', 'high_kerbs', 'narrow'] },
+];
 
-      <LanguageToggle variant="map" />
-    </motion.div>
-  );
-}
 
 function LegendDot({ color, label }) {
   return (
-    <div className="flex items-center gap-2.5 w-full">
-      <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: color }} aria-hidden="true" />
-      <span className="font-body text-xs text-white/85 font-medium">{label}</span>
+    <div className="flex items-center gap-2" style={{ paddingTop: 4, paddingBottom: 4 }}>
+      <div className="rounded-full flex-shrink-0" style={{ width: 8, height: 8, background: color }} aria-hidden="true" />
+      <span className="font-body truncate" style={{ fontSize: 11, color: 'rgba(255,255,255,0.85)', lineHeight: 1.3 }}>{label}</span>
     </div>
   );
 }

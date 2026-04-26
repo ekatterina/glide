@@ -111,11 +111,11 @@ export default function RouteCard({ liveRoute }) {
 
   return (
     <div className="w-full">
-      {/* Stats row */}
-      <div className="flex items-stretch gap-3 mb-3">
-        <div className="flex-1 bg-navy/5 rounded-2xl px-4 py-3 flex flex-col gap-0.5 relative">
+      {/* Stats row — 2 cards (warnings are shown as dots on the map) */}
+      <div className="flex items-stretch gap-2 mb-2">
+        <div className="flex-1 bg-navy/5 rounded-xl px-3 py-2 flex flex-col gap-1 relative">
           <div className="flex items-center justify-between">
-            <span className="font-body text-xs text-navy/50 font-medium">
+            <span className="font-body text-[10px] text-navy/45 uppercase tracking-wide font-semibold">
               {t('accessibilityStatLabel')}
             </span>
             {liveRoute && (
@@ -124,40 +124,30 @@ export default function RouteCard({ liveRoute }) {
                 onClick={() => setBreakdownOpen((v) => !v)}
                 aria-expanded={breakdownOpen}
                 aria-label={t('scoreBreakdownAria')}
-                className="w-5 h-5 rounded-full bg-navy/8 hover:bg-navy/15 flex items-center justify-center transition-colors -mr-1"
+                className="w-4 h-4 rounded-full bg-navy/8 hover:bg-navy/15 flex items-center justify-center transition-colors"
               >
                 <InfoIcon />
               </button>
             )}
           </div>
-          <span className={`font-display font-bold text-2xl ${scoreColor}`}>
-            {stats.score}{liveRoute ? '' : '%'}
-          </span>
-          <span className="font-body text-xs text-navy/50">
-            {liveRoute ? t('accessibilityStatLiveSuffix') : t('accessibilityStatSuffix').replace('%', '').trim()}
-          </span>
+          <div className="flex items-baseline gap-0.5">
+            <span className={`font-display font-bold text-xl leading-none ${scoreColor}`}>
+              {stats.score}
+            </span>
+            <span className="font-body text-[11px] text-navy/40 ml-0.5">
+              {liveRoute ? '/100' : '%'}
+            </span>
+          </div>
         </div>
 
-        <div className="flex-1 bg-navy/5 rounded-2xl px-4 py-3 flex flex-col gap-0.5">
-          <span className="font-body text-xs text-navy/50 font-medium">
+        <div className="flex-1 bg-navy/5 rounded-xl px-3 py-2 flex flex-col gap-1">
+          <span className="font-body text-[10px] text-navy/45 uppercase tracking-wide font-semibold">
             {t('timeStatLabel')}
           </span>
-          <span className="font-display font-bold text-2xl text-navy">
+          <span className="font-display font-bold text-xl leading-none text-navy">
             {stats.time}
           </span>
-          <span className="font-body text-xs text-navy/50">{stats.distance}</span>
-        </div>
-
-        <div className="flex-1 bg-navy/5 rounded-2xl px-4 py-3 flex flex-col gap-0.5">
-          <span className="font-body text-xs text-navy/50 font-medium">
-            {liveRoute ? t('warningStatLabel') : t('obstacleStatLabel')}
-          </span>
-          <span className="font-display font-bold text-2xl text-navy">
-            {stats.obstacles}
-          </span>
-          <span className="font-body text-xs text-navy/50">
-            {liveRoute ? t('warningStatSuffix') : t('obstacleStatSuffix')}
-          </span>
+          <span className="font-body text-[10px] text-navy/40 leading-none">{stats.distance}</span>
         </div>
       </div>
 
@@ -232,7 +222,7 @@ export default function RouteCard({ liveRoute }) {
         <motion.button
           whileTap={{ scale: 0.96 }}
           onClick={handleOpenInGoogleMaps}
-          className="w-full h-12 rounded-xl bg-navy text-cream font-body font-semibold text-sm flex items-center justify-center gap-2 mb-3 shadow-card"
+          className="w-full h-11 rounded-xl bg-navy text-cream font-body font-semibold text-sm flex items-center justify-center gap-2 mb-2 shadow-card"
         >
           <GoogleMapsIcon />
           {t('openInGoogleMaps')}
@@ -243,7 +233,7 @@ export default function RouteCard({ liveRoute }) {
       {/* Why this route */}
       <button
         onClick={() => setWhyOpen(!whyOpen)}
-        className="w-full flex items-center justify-between py-3 px-4 rounded-xl bg-navy/5 hover:bg-navy/8 transition-colors min-h-[48px]"
+        className="w-full flex items-center justify-between py-2.5 px-4 rounded-xl bg-navy/5 hover:bg-navy/8 transition-colors min-h-[40px]"
         aria-expanded={whyOpen}
       >
         <span className="font-body font-semibold text-sm text-navy">{t('whyThisRouteTitle')}</span>

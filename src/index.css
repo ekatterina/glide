@@ -37,6 +37,23 @@ body,
   display: none !important;
 }
 
+/* OSM obstacle hover tooltip — pill shape, no chrome, no arrow */
+.osm-tooltip .mapboxgl-popup-content {
+  background: #0F1F3D;
+  color: #fff;
+  padding: 5px 12px;
+  border-radius: 20px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.osm-tooltip .mapboxgl-popup-tip {
+  display: none;
+}
+
 /* Focus ring for keyboard nav */
 :focus-visible {
   outline: 2px solid #2ECC71;
